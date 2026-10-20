@@ -270,6 +270,16 @@ export async function toggleBookmarkManga(manga: Manga): Promise<boolean> {
   };
 
   await saveManga(merged);
+
+  // Background cloud sync to Supabase (non-blocking)
+  setTimeout(() => {
+    import('./cloudSync')
+      .then(({ syncSingleBookmarkToCloud }) => {
+        syncSingleBookmarkToCloud(merged, nextState);
+      })
+      .catch(() => {});
+  }, 0);
+
   return nextState;
 }
 

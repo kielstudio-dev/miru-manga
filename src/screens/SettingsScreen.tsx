@@ -19,6 +19,7 @@ import * as Sharing from 'expo-sharing';
 import { ReaderMode, BackgroundTheme, ReaderSettings } from '../types';
 import { getSettings, saveSettings, createBackupData, restoreBackupData } from '../services/storage';
 import { subscribeToProStatus, setUserPro, restorePurchases } from '../services/monetization';
+import { getCloudSyncStatus, performFullCloudSync, CloudSyncStatus } from '../services/cloudSync';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
 
@@ -46,13 +47,32 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
 
+  // Supabase Cloud Sync State
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
   useEffect(() => {
     getSettings().then((s) => {
       if (s) setSettings(s);
     });
+    getCloudSyncStatus().then(setSyncStatus);
     const unsub = subscribeToProStatus(setIsPro);
     return unsub;
   }, []);
+
+  const handleCloudSync = async () => {
+    try {
+      setSyncing(true);
+      const res = await performFullCloudSync();
+      const nextStatus = await getCloudSyncStatus();
+      setSyncStatus(nextStatus);
+      Alert.alert(res.success ? 'Cloud Sync Successful' : 'Sync Notice', res.message);
+    } catch (err: any) {
+      Alert.alert('Sync Error', err?.message || 'Could not sync.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleToggleNsfw = async (value: boolean) => {
     if (value) {
@@ -362,6 +382,51 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 />
               </View>
             )}
+          </View>
+
+          {/* Supabase Cloud Backup & Sync */}
+          <Text style={styles.sectionHeader}>Cloud Account & Sync (Supabase)</Text>
+          <View style={styles.card}>
+            <View style={styles.cloudStatusRow}>
+              <View style={styles.cloudStatusBadge}>
+                <View style={styles.cloudActiveDot} />
+                <Text style={styles.cloudStatusBadgeText}>
+                  {syncStatus?.isAuthenticated ? 'Cloud Connected' : 'Guest Mode'}
+                </Text>
+              </View>
+              {syncStatus?.userId && (
+                <Text style={styles.cloudUserIdText} numberOfLines={1}>
+                  UID: {syncStatus.userId.slice(0, 8)}...
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.cloudInfoBody}>
+              <Text style={styles.cloudInfoTitle}>
+                {syncStatus?.email ? syncStatus.email : 'Anonymous Reader Profile (Zero Sign-In)'}
+              </Text>
+              <Text style={styles.cloudInfoSubtitle}>
+                {syncStatus?.lastSyncTime
+                  ? `Last synced: ${new Date(syncStatus.lastSyncTime).toLocaleDateString()} at ${new Date(syncStatus.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : 'Bookmarks & reading history are backed up securely to your anonymous cloud profile.'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.cloudSyncActionBtn}
+              onPress={handleCloudSync}
+              disabled={syncing}
+              activeOpacity={0.8}
+            >
+              {syncing ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <Ionicons name="sync" size={16} color="#ffffff" />
+                  <Text style={styles.cloudSyncActionBtnText}>Sync Library to Cloud Now</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
 
           {/* Backup & Restore Section */}
@@ -858,5 +923,69 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
+  },
+  cloudStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  cloudStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  cloudActiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+  },
+  cloudStatusBadgeText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cloudUserIdText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  cloudInfoBody: {
+    marginBottom: 14,
+  },
+  cloudInfoTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cloudInfoSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 3,
+    lineHeight: 17,
+  },
+  cloudSyncActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingVertical: 11,
+    borderRadius: 10,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  cloudSyncActionBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
