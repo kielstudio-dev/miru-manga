@@ -1,4 +1,5 @@
 import { safeDbRun } from './storage';
+import { supabase } from './supabase';
 
 const PRO_SETTINGS_KEY = 'miru_pro_status';
 
@@ -50,8 +51,20 @@ export function subscribeToProStatus(callback: (isPro: boolean) => void): () => 
 // Simulate In-App Purchase (ready to connect with react-native-iap or Google Play Billing)
 export async function purchasePro(): Promise<{ success: boolean; message: string }> {
   try {
-    // In production, invoke Google Play Billing: InAppPurchases.purchaseItemAsync('miru_pro_lifetime')
     await setUserPro(true);
+
+    // Sync Pro status to cloud account metadata if available
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await supabase.auth.updateUser({
+          data: { is_pro: true, pro_purchased_at: Date.now() },
+        });
+      }
+    } catch (cloudErr) {
+      console.warn('[Monetization] Cloud Pro sync notice:', cloudErr);
+    }
+
     return {
       success: true,
       message: '🎉 Congratulations! You are now a Miru Lifetime Pro member. All ads removed permanently!',
@@ -66,8 +79,21 @@ export async function purchasePro(): Promise<{ success: boolean; message: string
 
 export async function restorePurchases(): Promise<{ isPro: boolean; message: string }> {
   try {
-    // In production, query Google Play purchase history
-    const pro = await isUserPro();
+    let pro = await isUserPro();
+
+    // Check cloud session if local SQLite doesn't show Pro yet
+    if (!pro) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.user_metadata?.is_pro) {
+          await setUserPro(true);
+          pro = true;
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+
     return {
       isPro: pro,
       message: pro

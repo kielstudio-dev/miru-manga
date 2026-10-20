@@ -2,6 +2,7 @@
   "expo": {
     "name": "Miru Manga",
     "slug": "miru-manga",
+    "scheme": "mirumanga",
     "owner": "kielstudio.dev",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -28,7 +29,8 @@
       "expo-sqlite",
       "expo-status-bar",
       "expo-sharing",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

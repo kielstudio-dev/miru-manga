@@ -20,6 +20,7 @@ import { ReaderMode, BackgroundTheme, ReaderSettings } from '../types';
 import { getSettings, saveSettings, createBackupData, restoreBackupData } from '../services/storage';
 import { subscribeToProStatus, setUserPro, restorePurchases } from '../services/monetization';
 import { getCloudSyncStatus, performFullCloudSync, CloudSyncStatus } from '../services/cloudSync';
+import { signInOrLinkGoogle, signOutAndResetToGuest } from '../services/auth';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
 
@@ -47,9 +48,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
 
-  // Supabase Cloud Sync State
+  // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [linkingGoogle, setLinkingGoogle] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -72,6 +74,40 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleLinkGoogle = async () => {
+    try {
+      setLinkingGoogle(true);
+      const res = await signInOrLinkGoogle();
+      const nextStatus = await getCloudSyncStatus();
+      setSyncStatus(nextStatus);
+      Alert.alert(res.success ? 'Account Connected' : 'Google Sign-In Notice', res.message);
+    } catch (e: any) {
+      Alert.alert('Notice', e?.message || 'Could not connect to Google.');
+    } finally {
+      setLinkingGoogle(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out? Your device will revert to a local guest session.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            await signOutAndResetToGuest();
+            const nextStatus = await getCloudSyncStatus();
+            setSyncStatus(nextStatus);
+            Alert.alert('Signed Out', 'You are now browsing in a guest session.');
+          },
+        },
+      ]
+    );
   };
 
   const handleToggleNsfw = async (value: boolean) => {
@@ -389,26 +425,60 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <View style={[styles.card, styles.cloudCard]}>
             <View style={styles.cloudStatusRow}>
               <View style={styles.cloudStatusBadge}>
-                <View style={styles.cloudActiveDot} />
+                <View
+                  style={[
+                    styles.cloudActiveDot,
+                    syncStatus?.email ? { backgroundColor: '#10b981' } : undefined,
+                  ]}
+                />
                 <Text style={styles.cloudStatusBadgeText}>
-                  {syncStatus?.isAuthenticated ? 'Cloud Active' : 'Standby'}
+                  {syncStatus?.email
+                    ? 'Google Protected'
+                    : syncStatus?.isAuthenticated
+                    ? 'Guest Cloud Sync'
+                    : 'Standby'}
                 </Text>
               </View>
-              {syncStatus?.userId && (
+              {syncStatus?.email ? (
+                <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn} activeOpacity={0.7}>
+                  <Text style={styles.signOutBtnText}>Sign Out</Text>
+                </TouchableOpacity>
+              ) : syncStatus?.userId ? (
                 <Text style={styles.cloudUserIdText} numberOfLines={1}>
-                  Profile ID: {syncStatus.userId.slice(0, 8)}...
+                  ID: {syncStatus.userId.slice(0, 8)}...
                 </Text>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.cloudInfoBody}>
-              <Text style={styles.cloudInfoTitle}>Automatic Library Backup</Text>
+              <Text style={styles.cloudInfoTitle}>
+                {syncStatus?.email ? syncStatus.email : 'Automatic Library Backup'}
+              </Text>
               <Text style={styles.cloudInfoSubtitle}>
                 {syncStatus?.lastSyncTime
                   ? `Last synced: ${new Date(syncStatus.lastSyncTime).toLocaleDateString()} at ${new Date(syncStatus.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   : 'Sync your bookmarks and reading progress seamlessly across devices.'}
               </Text>
             </View>
+
+            {/* If anonymous guest, offer Google link button for lifetime recovery */}
+            {!syncStatus?.email && (
+              <TouchableOpacity
+                style={styles.linkGoogleBtn}
+                onPress={handleLinkGoogle}
+                disabled={linkingGoogle}
+                activeOpacity={0.8}
+              >
+                {linkingGoogle ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-google" size={15} color="#ffffff" />
+                    <Text style={styles.linkGoogleBtnText}>Link Google Account for Recovery</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.cloudSyncActionBtn}
@@ -990,5 +1060,31 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
+  },
+  linkGoogleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#3b82f6',
+    paddingVertical: 11,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  linkGoogleBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  signOutBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  signOutBtnText: {
+    color: '#ef4444',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
