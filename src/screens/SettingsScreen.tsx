@@ -10,6 +10,7 @@ import {
   Switch,
   Modal,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -655,6 +656,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               with Google Play & App Store policies, allowing legitimate monetization through reading tools,
               cloud sync, and non-intrusive AdMob banner placement.
             </Text>
+
+            <TouchableOpacity
+              style={styles.privacyLinkRow}
+              onPress={() => Linking.openURL('https://kielstudio-dev.github.io/miru-manga/privacy.html')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="shield-checkmark" size={16} color="#10b981" />
+              <Text style={styles.privacyLinkText}>Official Privacy Policy</Text>
+              <Ionicons name="open-outline" size={14} color="#a78bfa" />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.footer}>
@@ -1202,6 +1213,24 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   checkUpdateBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  privacyLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(124, 92, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 92, 255, 0.3)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 14,
+  },
+  privacyLinkText: {
+    flex: 1,
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
