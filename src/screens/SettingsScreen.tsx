@@ -605,15 +605,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <View style={styles.updateCardRow}>
               <View style={{ flex: 1, marginRight: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.rowLabel}>Miru Manga v1.0.1</Text>
+                  <Text style={styles.rowLabel}>Miru Manga v1.0.0</Text>
                   <View style={styles.otaBadge}>
-                    <Text style={styles.otaBadgeText}>Live Patch Active 🚀</Text>
+                    <Text style={styles.otaBadgeText}>Latest</Text>
                   </View>
                 </View>
                 <Text style={styles.rowSubtitle}>
                   {Updates.updateId
-                    ? `Running cloud update: ${Updates.updateId.slice(0, 8)}...`
-                    : 'Tap check to fetch the newest features and improvements without reinstalling.'}
+                    ? `Build patch: ${Updates.updateId.slice(0, 8)}`
+                    : 'Tap Check to ensure you have the newest features and improvements.'}
                 </Text>
               </View>
 
@@ -669,7 +669,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Miru Manga v1.0.1 (Live OTA Verified) • Kiel Studio Devs</Text>
+            <Text style={styles.footerText}>Miru Manga v1.0.0 • Kiel Studio Devs</Text>
             <Text style={[styles.footerText, { marginTop: 4, color: colors.textMuted }]}>
               Support: kielstudio.dev@gmail.com
             </Text>
