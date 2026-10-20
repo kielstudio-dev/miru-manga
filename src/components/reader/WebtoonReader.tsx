@@ -578,7 +578,8 @@ const styles = StyleSheet.create({
   // End of Chapter Footer
   footerContainer: {
     width: SCREEN_WIDTH,
-    paddingVertical: 48,
+    paddingTop: 48,
+    paddingBottom: 110, // Generous clearance so Prev/Next Chapter buttons sit well above the floating pagination bar
     paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',

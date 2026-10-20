@@ -639,75 +639,80 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
 
       {/* Chapters Section Toolbar */}
       <View style={styles.chapterSectionHeader}>
-        <View style={styles.chapterHeaderLeft}>
-          <Text style={styles.sectionHeading}>Chapters ({chapters.length})</Text>
-          {chapters.length > 0 && (
+        {/* Left: Prominent Chapters Title & Count Badge */}
+        <View style={styles.chapterTitleWrap}>
+          <Text style={styles.chapterMainHeading}>Chapters</Text>
+          <View style={styles.chapterCountBadge}>
+            <Text style={styles.chapterCountBadgeText}>{chapters.length}</Text>
+          </View>
+        </View>
+
+        {/* Right: Balanced, evenly spaced toolbar buttons */}
+        {chapters.length > 0 && (
+          <View style={styles.chapterControlsRow}>
+            {/* Sort Toggle Button */}
             <TouchableOpacity
               style={styles.sortToggleBtn}
               onPress={() => setSortAscending((prev) => !prev)}
               activeOpacity={0.7}
             >
-              <Ionicons name="swap-vertical" size={13} color={colors.primary} />
+              <Ionicons name="swap-vertical" size={13} color="#a78bfa" />
               <Text style={styles.sortToggleText}>
                 {sortAscending ? '1 ➔ Recent' : 'Recent ➔ 1'}
               </Text>
             </TouchableOpacity>
-          )}
-        </View>
 
-        <View style={styles.chapterHeaderRight}>
-          {chapters.length > 0 && (
-            <>
+            {/* Multi-Select Mode Toggle */}
+            <TouchableOpacity
+              style={[styles.selectModeBtn, isSelectionMode && styles.selectModeBtnActive]}
+              onPress={() => {
+                setIsSelectionMode((prev) => !prev);
+                setSelectedChapterIds(new Set());
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={isSelectionMode ? 'close-circle' : 'checkbox-outline'}
+                size={14}
+                color={isSelectionMode ? '#ffffff' : '#a78bfa'}
+              />
+              <Text
+                style={[
+                  styles.selectModeBtnText,
+                  isSelectionMode && styles.selectModeBtnTextActive,
+                ]}
+              >
+                {isSelectionMode ? 'Done' : 'Select'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Quick Batch Download Next 3 */}
+            {!isSelectionMode && (
               <TouchableOpacity
-                style={[styles.selectModeBtn, isSelectionMode && styles.selectModeBtnActive]}
-                onPress={() => {
-                  setIsSelectionMode((prev) => !prev);
-                  setSelectedChapterIds(new Set());
-                }}
+                style={styles.batchDownloadBtn}
+                onPress={handleDownloadNextThree}
+                disabled={downloadingBatch}
                 activeOpacity={0.8}
               >
-                <Ionicons
-                  name={isSelectionMode ? 'close-circle' : 'checkbox-outline'}
-                  size={14}
-                  color={isSelectionMode ? '#ffffff' : colors.primary}
-                />
-                <Text
-                  style={[
-                    styles.selectModeBtnText,
-                    isSelectionMode && styles.selectModeBtnTextActive,
-                  ]}
-                >
-                  {isSelectionMode ? 'Done' : 'Select'}
-                </Text>
+                {downloadingBatch ? (
+                  <View style={styles.batchDownloadLoading}>
+                    <ActivityIndicator size="small" color="#7c5cff" />
+                    {batchProgress && (
+                      <Text style={styles.batchProgressText}>
+                        {batchProgress.current}/{batchProgress.total}
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <>
+                    <Ionicons name="cloud-download-outline" size={14} color="#7c5cff" />
+                    <Text style={styles.batchDownloadBtnText}>Next 3</Text>
+                  </>
+                )}
               </TouchableOpacity>
-
-              {!isSelectionMode && (
-                <TouchableOpacity
-                  style={styles.batchDownloadBtn}
-                  onPress={handleDownloadNextThree}
-                  disabled={downloadingBatch}
-                  activeOpacity={0.8}
-                >
-                  {downloadingBatch ? (
-                    <View style={styles.batchDownloadLoading}>
-                      <ActivityIndicator size="small" color="#7c5cff" />
-                      {batchProgress && (
-                        <Text style={styles.batchProgressText}>
-                          {batchProgress.current}/{batchProgress.total}
-                        </Text>
-                      )}
-                    </View>
-                  ) : (
-                    <>
-                      <Ionicons name="cloud-download-outline" size={14} color="#7c5cff" />
-                      <Text style={styles.batchDownloadBtnText}>Next 3</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
-            </>
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Selection Mode Quick Select-All Strip */}
@@ -999,44 +1004,66 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingVertical: 4,
     marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 10,
   },
-  chapterHeaderLeft: {
+  chapterTitleWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  chapterHeaderRight: {
+  chapterMainHeading: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  chapterCountBadge: {
+    backgroundColor: 'rgba(124, 92, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 92, 255, 0.35)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  chapterCountBadgeText: {
+    color: '#a78bfa',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  chapterControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
   },
   sortToggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    backgroundColor: 'rgba(124, 92, 255, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(124, 92, 255, 0.25)',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 9,
   },
   sortToggleText: {
-    color: colors.textSecondary,
+    color: '#a78bfa',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   selectModeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(124, 92, 255, 0.12)',
+    backgroundColor: 'rgba(124, 92, 255, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(124, 92, 255, 0.35)',
+    borderColor: 'rgba(124, 92, 255, 0.25)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+    paddingVertical: 6,
+    borderRadius: 9,
   },
   selectModeBtnActive: {
     backgroundColor: colors.primary,
@@ -1053,13 +1080,13 @@ const styles = StyleSheet.create({
   batchDownloadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(124, 92, 255, 0.12)',
+    gap: 4,
+    backgroundColor: 'rgba(124, 92, 255, 0.10)',
     borderWidth: 1,
-    borderColor: 'rgba(124, 92, 255, 0.35)',
+    borderColor: 'rgba(124, 92, 255, 0.25)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+    paddingVertical: 6,
+    borderRadius: 9,
   },
   batchDownloadBtnText: {
     color: '#a78bfa',
