@@ -1,17 +1,19 @@
 {
   "expo": {
-    "name": "manga-reader",
-    "slug": "manga-reader",
+    "name": "Miru Manga",
+    "slug": "miru-manga",
+    "owner": "kielstudio.dev",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.kiel.mirumanga",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#12121a",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -20,6 +22,18 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-image",
+      "expo-sqlite",
+      "expo-status-bar",
+      "expo-sharing",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a5d37bba-7ba5-4ebb-9c8e-34e7e46df68e"
+      }
     }
   }
 }
