@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
+import * as Updates from 'expo-updates';
 import { ReaderMode, BackgroundTheme, ReaderSettings } from '../types';
 import { getSettings, saveSettings, createBackupData, restoreBackupData } from '../services/storage';
 import { subscribeToProStatus, setUserPro, restorePurchases } from '../services/monetization';
@@ -52,6 +53,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [linkingGoogle, setLinkingGoogle] = useState(false);
+
+  // OTA Updates State
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -108,6 +112,43 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         },
       ]
     );
+  };
+
+  const handleCheckForUpdates = async () => {
+    try {
+      setCheckingUpdate(true);
+      if (__DEV__) {
+        Alert.alert('Development Mode', 'Over-The-Air updates are only active in installed APK builds.');
+        return;
+      }
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert('Update Found', 'Downloading the latest version in the background...');
+        await Updates.fetchUpdateAsync();
+        Alert.alert(
+          'Update Ready! 🚀',
+          'The newest update has been downloaded. Would you like to reload the app now?',
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Reload Now',
+              onPress: async () => {
+                await Updates.reloadAsync();
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Up to Date ✅', 'You are already running the latest version of Miru Manga!');
+      }
+    } catch (error: any) {
+      Alert.alert(
+        'Update Notice',
+        error?.message || 'Could not reach update server. Check your internet connection.'
+      );
+    } finally {
+      setCheckingUpdate(false);
+    }
   };
 
   const handleToggleNsfw = async (value: boolean) => {
@@ -555,6 +596,42 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </View>
               <Ionicons name="trash-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
+          </View>
+
+          {/* App Updates Section */}
+          <Text style={styles.sectionHeader}>App Updates & Version</Text>
+          <View style={[styles.card, styles.updateCard]}>
+            <View style={styles.updateCardRow}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.rowLabel}>Miru Manga v1.0.0</Text>
+                  <View style={styles.otaBadge}>
+                    <Text style={styles.otaBadgeText}>OTA Enabled</Text>
+                  </View>
+                </View>
+                <Text style={styles.rowSubtitle}>
+                  {Updates.updateId
+                    ? `Running cloud update: ${Updates.updateId.slice(0, 8)}...`
+                    : 'Tap check to fetch the newest features and improvements without reinstalling.'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.checkUpdateBtn}
+                onPress={handleCheckForUpdates}
+                disabled={checkingUpdate}
+                activeOpacity={0.8}
+              >
+                {checkingUpdate ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={16} color="#ffffff" />
+                    <Text style={styles.checkUpdateBtnText}>Check</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Legal Guardrail & Architecture Notice */}
@@ -1086,5 +1163,47 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 11,
     fontWeight: '600',
+  },
+  updateCard: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  updateCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  otaBadge: {
+    backgroundColor: 'rgba(124, 92, 255, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 92, 255, 0.3)',
+  },
+  otaBadgeText: {
+    color: '#a78bfa',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  checkUpdateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#7c5cff',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    shadowColor: '#7c5cff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  checkUpdateBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
