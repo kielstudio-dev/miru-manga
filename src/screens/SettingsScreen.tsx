@@ -384,31 +384,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             )}
           </View>
 
-          {/* Supabase Cloud Backup & Sync */}
-          <Text style={styles.sectionHeader}>Cloud Account & Sync (Supabase)</Text>
-          <View style={styles.card}>
+          {/* Cloud Library Backup Section */}
+          <Text style={styles.sectionHeader}>Cloud Backup & Sync</Text>
+          <View style={[styles.card, styles.cloudCard]}>
             <View style={styles.cloudStatusRow}>
               <View style={styles.cloudStatusBadge}>
                 <View style={styles.cloudActiveDot} />
                 <Text style={styles.cloudStatusBadgeText}>
-                  {syncStatus?.isAuthenticated ? 'Cloud Connected' : 'Guest Mode'}
+                  {syncStatus?.isAuthenticated ? 'Cloud Active' : 'Standby'}
                 </Text>
               </View>
               {syncStatus?.userId && (
                 <Text style={styles.cloudUserIdText} numberOfLines={1}>
-                  UID: {syncStatus.userId.slice(0, 8)}...
+                  Profile ID: {syncStatus.userId.slice(0, 8)}...
                 </Text>
               )}
             </View>
 
             <View style={styles.cloudInfoBody}>
-              <Text style={styles.cloudInfoTitle}>
-                {syncStatus?.email ? syncStatus.email : 'Anonymous Reader Profile (Zero Sign-In)'}
-              </Text>
+              <Text style={styles.cloudInfoTitle}>Automatic Library Backup</Text>
               <Text style={styles.cloudInfoSubtitle}>
                 {syncStatus?.lastSyncTime
                   ? `Last synced: ${new Date(syncStatus.lastSyncTime).toLocaleDateString()} at ${new Date(syncStatus.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                  : 'Bookmarks & reading history are backed up securely to your anonymous cloud profile.'}
+                  : 'Sync your bookmarks and reading progress seamlessly across devices.'}
               </Text>
             </View>
 
@@ -422,8 +420,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <ActivityIndicator size="small" color="#ffffff" />
               ) : (
                 <>
-                  <Ionicons name="sync" size={16} color="#ffffff" />
-                  <Text style={styles.cloudSyncActionBtnText}>Sync Library to Cloud Now</Text>
+                  <Ionicons name="cloud-upload" size={16} color="#ffffff" />
+                  <Text style={styles.cloudSyncActionBtnText}>Sync Library Now</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -924,11 +922,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  cloudCard: {
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+  },
   cloudStatusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   cloudStatusBadge: {
     flexDirection: 'row',
@@ -936,7 +938,7 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: 'rgba(16, 185, 129, 0.12)',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 6,
   },
   cloudActiveDot: {
@@ -956,7 +958,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   cloudInfoBody: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   cloudInfoTitle: {
     color: colors.textPrimary,
@@ -966,8 +968,8 @@ const styles = StyleSheet.create({
   cloudInfoSubtitle: {
     color: colors.textSecondary,
     fontSize: 12,
-    marginTop: 3,
-    lineHeight: 17,
+    marginTop: 4,
+    lineHeight: 18,
   },
   cloudSyncActionBtn: {
     flexDirection: 'row',
@@ -975,8 +977,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: colors.primary,
-    paddingVertical: 11,
-    borderRadius: 10,
+    paddingVertical: 13,
+    borderRadius: 12,
+    width: '100%',
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.35,

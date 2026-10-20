@@ -89,7 +89,7 @@ export async function performFullCloudSync(): Promise<{
       success: false,
       uploadedCount: 0,
       downloadedCount: 0,
-      message: 'Could not connect to cloud sync. Check internet or Supabase settings.',
+      message: 'Unable to connect to cloud backup. Please check your internet connection or cloud service settings.',
     };
   }
 
