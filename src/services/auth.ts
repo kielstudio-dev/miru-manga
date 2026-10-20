@@ -4,8 +4,7 @@ import { setUserPro } from './monetization';
 import { performFullCloudSync } from './cloudSync';
 
 // Web Client ID from Google Cloud Console (OAuth 2.0 Web Client)
-// Once you obtain your Client ID from Google Cloud Console, paste it here.
-export const GOOGLE_WEB_CLIENT_ID = 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com';
+export const GOOGLE_WEB_CLIENT_ID = '351186385879-i7s95o654i3ka3upkncurji7sl0rad5q.apps.googleusercontent.com';
 
 export interface AuthProfile {
   isAuthenticated: boolean;
