@@ -54,12 +54,14 @@ interface ExtensionsScreenProps {
   onBack?: () => void;
   onOpenManga: (manga: Manga) => void;
   showBackButton?: boolean;
+  isFocused?: boolean;
 }
 
 export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
   onBack,
   onOpenManga,
   showBackButton = false,
+  isFocused = true,
 }) => {
   const [activeTab, setActiveTab] = useState<'available' | 'installed'>('available');
   const [extensions, setExtensions] = useState<ExtensionManifest[]>([]);
@@ -100,8 +102,10 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
   }, []);
 
   useEffect(() => {
-    refreshBookmarkedIds();
-  }, [refreshBookmarkedIds, browsingExtension]);
+    if (isFocused) {
+      refreshBookmarkedIds();
+    }
+  }, [refreshBookmarkedIds, browsingExtension, isFocused]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -468,7 +472,9 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 ) : undefined
               }
               renderItem={({ item }) => {
-                const isBookmarked = bookmarkedMangaIds.has(item.id);
+                const isBookmarked =
+                  bookmarkedMangaIds.has(item.id) ||
+                  bookmarkedMangaIds.has(`title::${item.title.toLowerCase().trim()}`);
                 return (
                   <TouchableOpacity
                     style={styles.browseCard}
@@ -477,7 +483,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                     delayLongPress={350}
                     activeOpacity={0.8}
                   >
-                    <View style={styles.browseCardCoverWrapper}>
+                    <View style={[styles.browseCardCoverWrapper, isBookmarked && styles.browseCardCoverWrapperBookmarked]}>
                       <Image
                         source={{
                           uri: item.coverUrl,
@@ -494,7 +500,8 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                       />
                       {isBookmarked && (
                         <View style={styles.browseBookmarkBadge}>
-                          <Ionicons name="heart" size={11} color="#ffffff" />
+                          <Ionicons name="bookmark" size={10} color="#ffffff" />
+                          <Text style={styles.browseBookmarkBadgeText}>IN LIBRARY</Text>
                         </View>
                       )}
                     </View>
@@ -680,8 +687,8 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
           {/* Floating Toast Notification */}
           {toastMessage && (
             <View style={styles.toastContainer}>
-              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-              <Text style={styles.toastText} numberOfLines={1}>
+              <Ionicons name="checkmark-circle" size={17} color="#10b981" />
+              <Text style={styles.toastText}>
                 {toastMessage}
               </Text>
             </View>
@@ -723,7 +730,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
         <View style={styles.bannerCard}>
           <View style={styles.bannerHeader}>
             <Ionicons name="shield-checkmark" size={18} color={colors.accent} />
-            <Text style={styles.bannerTitle}>Modular Architecture (Mihon Model)</Text>
+            <Text style={styles.bannerTitle}>Open Modular Architecture</Text>
           </View>
           <Text style={styles.bannerText}>
             The core app contains no scraped content. Extensions are dynamic plugins loaded
@@ -1061,8 +1068,8 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 <View style={styles.disclaimerBox}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={colors.textMuted} />
                   <Text style={styles.disclaimerText}>
-                    DMCA Notice: Vortex Reader is an independent media player engine. It does not
-                    host, index, or distribute copyrighted manga. Repositories are maintained by
+                    DMCA Notice: Miru Manga is an independent media player engine developed by Vortex App Labs. It does not
+                    host, index, or distribute copyrighted content. Repositories are maintained by
                     autonomous third-party communities.
                   </Text>
                 </View>
@@ -1647,21 +1654,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  browseCardCoverWrapperBookmarked: {
+    borderColor: 'rgba(124, 92, 255, 0.65)',
+  },
   browseBookmarkBadge: {
     position: 'absolute',
     top: 6,
     right: 6,
-    backgroundColor: '#ef4444',
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.5,
     shadowRadius: 3,
-    elevation: 4,
+    elevation: 5,
+  },
+  browseBookmarkBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
   quickModalBackdrop: {
     flex: 1,
@@ -1814,18 +1833,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     alignSelf: 'center',
+    maxWidth: '88%',
     backgroundColor: '#1b1b26',
     borderWidth: 1,
     borderColor: '#2e2e42',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 24,
+    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.45,
     shadowRadius: 10,
     elevation: 8,
     zIndex: 999,
@@ -1833,7 +1853,9 @@ const styles = StyleSheet.create({
   toastText: {
     color: '#ffffff',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
+    lineHeight: 18,
+    flexShrink: 1,
   },
   ispBlockCard: {
     backgroundColor: '#16141e',

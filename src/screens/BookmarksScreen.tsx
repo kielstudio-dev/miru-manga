@@ -597,8 +597,8 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
         {/* Floating Toast Notification */}
         {toastMessage && (
           <View style={styles.toastContainer}>
-            <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-            <Text style={styles.toastText} numberOfLines={1}>
+            <Ionicons name="checkmark-circle" size={17} color="#10b981" />
+            <Text style={styles.toastText}>
               {toastMessage}
             </Text>
           </View>
@@ -1001,18 +1001,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     alignSelf: 'center',
+    maxWidth: '88%',
     backgroundColor: '#1b1b26',
     borderWidth: 1,
     borderColor: '#2e2e42',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 24,
+    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.45,
     shadowRadius: 10,
     elevation: 8,
     zIndex: 999,
@@ -1020,6 +1021,8 @@ const styles = StyleSheet.create({
   toastText: {
     color: '#ffffff',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
+    lineHeight: 18,
+    flexShrink: 1,
   },
 });

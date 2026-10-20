@@ -80,10 +80,10 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={tab.label}
             >
-              <View style={[styles.iconWrapper, isActive && styles.activeIconWrapper]}>
+              <View style={styles.iconWrapper}>
                 <Ionicons
                   name={isActive ? tab.activeIcon : tab.inactiveIcon}
-                  size={21}
+                  size={22}
                   color={isActive ? colors.primary : colors.textMuted}
                 />
                 {Boolean(typeof tab.badge === 'number' && tab.badge > 0 && tab.id === 'downloads') && (
@@ -103,6 +103,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
               >
                 {tab.label}
               </Text>
+              <View style={styles.indicatorContainer}>
+                {isActive && <View style={styles.activeDot} />}
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -137,20 +140,16 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   iconWrapper: {
-    width: 44,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 26,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
   },
-  activeIconWrapper: {
-    backgroundColor: 'rgba(124, 92, 255, 0.18)',
-  },
   badge: {
     position: 'absolute',
-    top: -2,
-    right: 2,
+    top: -3,
+    right: -4,
     backgroundColor: colors.accent,
     minWidth: 16,
     height: 16,
@@ -168,7 +167,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 11,
-    marginTop: 3,
+    marginTop: 2,
     letterSpacing: 0.2,
   },
   activeLabel: {
@@ -178,5 +177,22 @@ const styles = StyleSheet.create({
   inactiveLabel: {
     color: colors.textMuted,
     fontWeight: '500',
+  },
+  indicatorContainer: {
+    height: 4,
+    marginTop: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.9,
+    shadowRadius: 3,
+    elevation: 3,
   },
 });

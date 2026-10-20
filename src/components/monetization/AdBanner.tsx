@@ -29,7 +29,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ onUpgradePress }) => {
             Google AdMob Banner • Test Mode
           </Text>
           <Text style={styles.adSubtitle} numberOfLines={1}>
-            Enjoying Vortex? Support development & go ad-free!
+            Enjoying Miru Manga? Support development & go ad-free!
           </Text>
         </View>
 

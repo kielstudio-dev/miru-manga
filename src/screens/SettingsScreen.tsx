@@ -429,7 +429,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <View style={[styles.card, styles.complianceCard]}>
             <View style={styles.complianceHeader}>
               <Ionicons name="shield-checkmark" size={22} color={colors.accent} />
-              <Text style={styles.complianceTitle}>The "VLC / Mihon" Legal Model</Text>
+              <Text style={styles.complianceTitle}>Independent Media Player Legal Model</Text>
             </View>
             <Text style={styles.complianceText}>
               • <Text style={styles.boldText}>Zero Copyright Infringement:</Text> This application

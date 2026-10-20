@@ -118,6 +118,7 @@ export default function App() {
               <ExtensionsScreen
                 onOpenManga={handleOpenManga}
                 showBackButton={false}
+                isFocused={currentScreen === 'main' && activeTab === 'extensions'}
               />
             </View>
 

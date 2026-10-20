@@ -275,7 +275,14 @@ export async function toggleBookmarkManga(manga: Manga): Promise<boolean> {
 
 export async function getBookmarkedMangaIds(): Promise<Set<string>> {
   const all = await getAllManga();
-  return new Set(all.filter((m) => m.isFavorite).map((m) => m.id));
+  const set = new Set<string>();
+  for (const m of all) {
+    if (m.isFavorite) {
+      if (m.id) set.add(m.id);
+      if (m.title) set.add(`title::${m.title.toLowerCase().trim()}`);
+    }
+  }
+  return set;
 }
 
 export async function getAllManga(): Promise<Manga[]> {

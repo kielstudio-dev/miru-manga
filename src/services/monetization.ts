@@ -1,6 +1,6 @@
 import { safeDbRun } from './storage';
 
-const PRO_SETTINGS_KEY = 'vortex_pro_status';
+const PRO_SETTINGS_KEY = 'miru_pro_status';
 
 // In-memory cache
 let cachedIsPro: boolean | null = null;
@@ -50,11 +50,11 @@ export function subscribeToProStatus(callback: (isPro: boolean) => void): () => 
 // Simulate In-App Purchase (ready to connect with react-native-iap or Google Play Billing)
 export async function purchasePro(): Promise<{ success: boolean; message: string }> {
   try {
-    // In production, invoke Google Play Billing: InAppPurchases.purchaseItemAsync('vortex_pro_lifetime')
+    // In production, invoke Google Play Billing: InAppPurchases.purchaseItemAsync('miru_pro_lifetime')
     await setUserPro(true);
     return {
       success: true,
-      message: '🎉 Congratulations! You are now a Vortex Pro member. All ads removed permanently!',
+      message: '🎉 Congratulations! You are now a Miru Lifetime Pro member. All ads removed permanently!',
     };
   } catch (err: any) {
     return {

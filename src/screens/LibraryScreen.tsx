@@ -369,7 +369,7 @@ const ONLINE_CATEGORIES = [
         {/* Top Header Bar */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>VORTEX</Text>
+            <Text style={styles.headerTitle}>MIRU MANGA</Text>
             <Text style={styles.headerSubtitle}>Manga & Comic Engine</Text>
           </View>
           <View style={styles.headerActions}>

@@ -76,7 +76,7 @@ export const COMMUNITY_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
     icon: 'https://mangadex.org/favicon.ico',
     baseUrl: 'https://api.mangadex.org',
     type: 'mangadex',
-    description: 'Flagship Tachiyomi/Mihon source. 70,000+ manga, manhwa & manhua with zero blockades.',
+    description: 'High-speed global catalog. 70,000+ manga, manhwa & manhua with zero blockades.',
   },
   {
     id: 'mangaread-org',

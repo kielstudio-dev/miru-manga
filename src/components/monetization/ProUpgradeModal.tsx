@@ -55,7 +55,7 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({ visible, onClo
       setPurchasing(true);
       const res = await purchasePro();
       if (res.success) {
-        Alert.alert('Vortex Pro Activated', res.message, [
+        Alert.alert('Miru Lifetime Pro Activated', res.message, [
           { text: 'Awesome!', onPress: onClose },
         ]);
       } else {
@@ -97,7 +97,7 @@ export const ProUpgradeModal: React.FC<ProUpgradeModalProps> = ({ visible, onClo
               <View style={styles.crownContainer}>
                 <Ionicons name="diamond" size={32} color="#7c5cff" />
               </View>
-              <Text style={styles.title}>VORTEX PRO</Text>
+              <Text style={styles.title}>MIRU PRO</Text>
               <Text style={styles.subtitle}>The Ultimate Manga & Comic Engine</Text>
             </View>
 
