@@ -1068,7 +1068,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 <View style={styles.disclaimerBox}>
                   <Ionicons name="shield-checkmark-outline" size={16} color={colors.textMuted} />
                   <Text style={styles.disclaimerText}>
-                    DMCA Notice: Miru Manga is an independent media player engine developed by Vortex App Labs. It does not
+                    DMCA Notice: Miru Manga is an independent media player engine developed by Kiel Studio Devs (kielstudio.dev@gmail.com). It does not
                     host, index, or distribute copyrighted content. Repositories are maintained by
                     autonomous third-party communities.
                   </Text>

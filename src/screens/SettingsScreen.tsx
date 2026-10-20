@@ -448,7 +448,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Manga & Comic Engine v1.0.0 (Expo Native)</Text>
+            <Text style={styles.footerText}>Miru Manga v1.0.0 • Kiel Studio Devs</Text>
+            <Text style={[styles.footerText, { marginTop: 4, color: colors.textMuted }]}>
+              Support: kielstudio.dev@gmail.com
+            </Text>
           </View>
         </ScrollView>
 
