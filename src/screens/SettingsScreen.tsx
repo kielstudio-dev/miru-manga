@@ -604,9 +604,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <View style={styles.updateCardRow}>
               <View style={{ flex: 1, marginRight: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.rowLabel}>Miru Manga v1.0.0</Text>
+                  <Text style={styles.rowLabel}>Miru Manga v1.0.1</Text>
                   <View style={styles.otaBadge}>
-                    <Text style={styles.otaBadgeText}>OTA Enabled</Text>
+                    <Text style={styles.otaBadgeText}>Live Patch Active 🚀</Text>
                   </View>
                 </View>
                 <Text style={styles.rowSubtitle}>
@@ -658,7 +658,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Miru Manga v1.0.0 • Kiel Studio Devs</Text>
+            <Text style={styles.footerText}>Miru Manga v1.0.1 (Live OTA Verified) • Kiel Studio Devs</Text>
             <Text style={[styles.footerText, { marginTop: 4, color: colors.textMuted }]}>
               Support: kielstudio.dev@gmail.com
             </Text>
