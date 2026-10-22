@@ -680,19 +680,30 @@ export class DynamicMadaraSource implements ISource {
       }
     }
 
-    const results: string[] = [];
+    interface RawPageItem {
+      url: string;
+      explicitIndex: number | null;
+      originalOrder: number;
+    }
+
+    const rawItems: RawPageItem[] = [];
     const seen = new Set<string>();
 
-    const addUrl = (rawUrl: string) => {
+    const addUrl = (rawUrl: string, explicitIndex: number | null = null) => {
       if (!rawUrl) return;
-      const clean = rawUrl.replace(/[\r\n\t\s]/g, '').trim();
+      let clean = rawUrl.replace(/[\r\n\t\s]/g, '').trim();
       if (!clean) return;
       if (clean.startsWith('data:image')) return;
       if (clean.includes('blank.gif') || clean.includes('dflazy') || clean.includes('placeholder')) return;
       if (clean.includes('avatar') || clean.includes('logo') || clean.includes('favicon') || clean.includes('/ads/') || clean.includes('/covers/') || clean.includes('thumbnail')) return;
+      if (clean.startsWith('//')) clean = `https:${clean}`;
       if (!seen.has(clean)) {
         seen.add(clean);
-        results.push(clean);
+        rawItems.push({
+          url: clean,
+          explicitIndex,
+          originalOrder: rawItems.length,
+        });
       }
     };
 
@@ -706,15 +717,22 @@ export class DynamicMadaraSource implements ISource {
         /class=["'][^"']*(?:chapter-img|reading-image|page-break)[^"']*["']/i.test(tag);
 
       if (isChapterImg) {
+        const indexMatch =
+          tag.match(/\bid=["']image-(\d+)["']/i) ||
+          tag.match(/data-page=["'](\d+)["']/i) ||
+          tag.match(/data-index=["'](\d+)["']/i) ||
+          tag.match(/data-number=["'](\d+)["']/i);
+        const explicitIdx = indexMatch ? parseInt(indexMatch[1], 10) : null;
+
         const srcMatch = tag.match(/(?:data-src|data-lazy-src|data-cfsrc|data-full-url|src)\s*=\s*["']([^"']+)["']/i);
         if (srcMatch) {
-          addUrl(srcMatch[1]);
+          addUrl(srcMatch[1], explicitIdx);
         }
       }
     }
 
     // Strategy B: If no tagged images, search reading-content or chapter-video-frame containers
-    if (results.length === 0) {
+    if (rawItems.length === 0) {
       const readingDivMatches = [
         ...html.matchAll(
           /<div\b[^>]*class=["'][^"']*(?:reading-content|read-container|chapter-video-frame)[^"']*["'][^>]*>([\s\S]*?)(?:<div class=["'](?:c-breadcrumb|c-selectpicker|comments-area|entry-navigation)|<footer|<\/body)/gi
@@ -724,24 +742,32 @@ export class DynamicMadaraSource implements ISource {
         const blockImgs = [...rMatch[1].matchAll(/<img\b[^>]*>/gi)];
         for (const tagMatch of blockImgs) {
           const tag = tagMatch[0];
+          const indexMatch =
+            tag.match(/\bid=["']image-(\d+)["']/i) ||
+            tag.match(/data-page=["'](\d+)["']/i) ||
+            tag.match(/data-index=["'](\d+)["']/i) ||
+            tag.match(/data-number=["'](\d+)["']/i);
+          const explicitIdx = indexMatch ? parseInt(indexMatch[1], 10) : null;
+
           const srcMatch = tag.match(/(?:data-src|data-lazy-src|data-cfsrc|data-full-url|src)\s*=\s*["']([^"']+)["']/i);
           if (srcMatch) {
-            addUrl(srcMatch[1]);
+            addUrl(srcMatch[1], explicitIdx);
           }
         }
-        if (results.length > 0) break;
+        if (rawItems.length > 0) break;
       }
     }
 
     // Strategy C: Check for inline JSON array
-    if (results.length === 0) {
+    if (rawItems.length === 0) {
       const jsonMatch = html.match(/(?:chapter_preloaded_images|wpmangaimg)\s*=\s*(\[[^\]]+\])/i);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[1]);
           if (Array.isArray(parsed)) {
-            for (const u of parsed) {
-              if (typeof u === 'string') addUrl(u);
+            for (let idx = 0; idx < parsed.length; idx++) {
+              const u = parsed[idx];
+              if (typeof u === 'string') addUrl(u, idx);
             }
           }
         } catch (e) {}
@@ -749,7 +775,7 @@ export class DynamicMadaraSource implements ISource {
     }
 
     // Strategy D: General chapter images for modern webtoon sites like Asura and Flame Comics
-    if (results.length === 0) {
+    if (rawItems.length === 0) {
       const allImgs = [...html.matchAll(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi)];
       for (const m of allImgs) {
         let u = m[1];
@@ -764,13 +790,46 @@ export class DynamicMadaraSource implements ISource {
       }
     }
 
-    if (results.length === 0) {
+    if (rawItems.length === 0) {
       throw new Error('This chapter has not yet been published with pages by the source provider.');
     }
 
-    return results.map((url, idx) => ({
+    // Smart Sorting:
+    // 1. If explicit page indices exist (e.g. id="image-N", data-page="N") across images, sort by explicit index
+    const withExplicit = rawItems.filter((item) => item.explicitIndex !== null);
+    if (withExplicit.length >= Math.ceil(rawItems.length * 0.4)) {
+      rawItems.sort((a, b) => {
+        if (a.explicitIndex !== null && b.explicitIndex !== null) {
+          return a.explicitIndex - b.explicitIndex;
+        }
+        return a.originalOrder - b.originalOrder;
+      });
+    } else {
+      // 2. Check if filenames have natural sequential numbers (e.g., 001.jpg, 002.jpg)
+      const numRegex = /\/([a-zA-Z0-9_\-]+[_\-])?(\d+)\.(?:jpe?g|png|webp|avif)(?:\?.*)?$/i;
+      const matchesNum = rawItems.every((item) => numRegex.test(item.url));
+      if (matchesNum && rawItems.length > 1) {
+        const fileNumbers = rawItems.map((item) => {
+          const m = item.url.match(numRegex);
+          return m ? parseInt(m[2], 10) : null;
+        });
+        const isAlreadySorted = fileNumbers.every((n, i) => i === 0 || (n !== null && fileNumbers[i - 1] !== null && n >= fileNumbers[i - 1]!));
+        if (!isAlreadySorted) {
+          rawItems.sort((a, b) => {
+            const na = a.url.match(numRegex);
+            const nb = b.url.match(numRegex);
+            if (na && nb) {
+              return parseInt(na[2], 10) - parseInt(nb[2], 10);
+            }
+            return a.originalOrder - b.originalOrder;
+          });
+        }
+      }
+    }
+
+    return rawItems.map((item, idx) => ({
       index: idx,
-      url: url,
+      url: item.url,
     }));
   }
 }

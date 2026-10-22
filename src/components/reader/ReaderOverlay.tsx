@@ -27,6 +27,7 @@ interface ReaderOverlayProps {
   onNextChapter?: () => void;
   hasPrevChapter?: boolean;
   hasNextChapter?: boolean;
+  onReloadChapter?: () => void;
 }
 
 export const ReaderOverlay: React.FC<ReaderOverlayProps> = ({
@@ -45,6 +46,7 @@ export const ReaderOverlay: React.FC<ReaderOverlayProps> = ({
   onNextChapter,
   hasPrevChapter,
   hasNextChapter,
+  onReloadChapter,
 }) => {
   if (!visible) return null;
 
@@ -67,10 +69,22 @@ export const ReaderOverlay: React.FC<ReaderOverlayProps> = ({
               </Text>
             </View>
 
-            <View style={styles.pageBadge}>
-              <Text style={styles.pageBadgeText}>
-                {currentPage + 1}/{totalPages}
-              </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {onReloadChapter && (
+                <TouchableOpacity
+                  onPress={onReloadChapter}
+                  style={styles.iconButton}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Reload chapter from source"
+                >
+                  <Ionicons name="refresh-outline" size={20} color={colors.textPrimary} />
+                </TouchableOpacity>
+              )}
+              <View style={styles.pageBadge}>
+                <Text style={styles.pageBadgeText}>
+                  {currentPage + 1}/{totalPages}
+                </Text>
+              </View>
             </View>
           </View>
         </SafeAreaView>

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -200,6 +201,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [sortAscending, setSortAscending] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const userManuallyToggledSort = useRef<boolean>(false);
 
   // Multi-select state
@@ -435,6 +437,29 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
     }
     fetchChapters();
   }, [manga]);
+
+  // Pull-to-refresh live chapter list from the source provider
+  const handleRefreshChapters = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const source = sourceRegistry.get(manga.sourceId) || sourceRegistry.getLocalSource();
+      if (source && source.getChapters) {
+        const freshList = await source.getChapters(manga.id);
+        if (freshList && freshList.length > 0) {
+          await saveChapters(manga.id, freshList);
+          setChapters(freshList);
+          if (!userManuallyToggledSort.current) {
+            const upToDate = isUserUpToDateWithManga(freshList, manga.lastReadChapterId);
+            setSortAscending(!upToDate);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[MangaDetailScreen] Chapter refresh warning:', err?.message || err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [manga.id, manga.sourceId, manga.lastReadChapterId]);
 
   // Smart Resume / Next Chapter target
   const primaryAction = useMemo(() => {
@@ -942,6 +967,14 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
           windowSize={11}
           removeClippedSubviews={Platform.OS === 'android'}
           getItemLayout={getItemLayout}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefreshChapters}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
         />
 
         {/* Floating Multi-Select Action Bar */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { Manga, Chapter, Page, ReaderMode, BackgroundTheme } from '../../types';
@@ -68,6 +68,37 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     } catch (err: any) {
       console.error('[ReaderView] Error loading chapter pages:', err);
       setError(err?.message || 'Failed to load chapter pages.');
+    } finally {
+      setLoading(false);
+    }
+  }, [chapter]);
+
+  // Force-reload chapter pages directly from source with cache-busting
+  const handleReloadChapter = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const source = sourceRegistry.get(chapter.sourceId) || sourceRegistry.getLocalSource();
+      const freshPages = await source.getPageList(chapter.id);
+
+      // Append cache-buster timestamp query to image URLs so expo-image bypasses disk cache for any re-uploaded fixes
+      const cacheBustedPages = freshPages.map((p) => {
+        const sep = p.url.includes('?') ? '&' : '?';
+        return {
+          ...p,
+          url: `${p.url}${sep}_t=${Date.now()}`,
+        };
+      });
+
+      setPages(cacheBustedPages);
+      setCurrentPage(0);
+      Alert.alert(
+        'Chapter Reloaded 🔄',
+        `Successfully reloaded ${freshPages.length} pages fresh from the source with updated ordering.`
+      );
+    } catch (err: any) {
+      console.error('[ReaderView] Error reloading chapter:', err);
+      Alert.alert('Reload Notice', err?.message || 'Could not fetch fresh chapter pages from source.');
     } finally {
       setLoading(false);
     }
@@ -292,6 +323,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         onNextChapter={handleNextChapter}
         hasPrevChapter={hasPrevChapter}
         hasNextChapter={hasNextChapter}
+        onReloadChapter={handleReloadChapter}
       />
     </View>
   );
