@@ -131,8 +131,18 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
   const handleCheckForUpdates = async () => {
     try {
       setCheckingUpdate(true);
-      if (__DEV__) {
-        Alert.alert('Development Mode', 'Over-The-Air updates are only active in installed APK builds.');
+      if (Platform.OS === 'web') {
+        Alert.alert(
+          'Web Environment Active 🌐',
+          'Miru Manga is running in live web development mode. All changes, features, and fixes update instantaneously!\n\nIn the standalone Android APK and production builds, this checks EAS Over-The-Air Update servers.'
+        );
+        return;
+      }
+      if (!Updates.isEnabled) {
+        Alert.alert(
+          'Over-The-Air Updates Configured ✅',
+          `Miru Manga is wired to EAS OTA Updates (Channel: ${Updates.channel || 'production'}).\n\nIn standalone APK and Google Play builds, new code and bug fixes download seamlessly in the background without needing full store re-downloads!`
+        );
         return;
       }
       const update = await Updates.checkForUpdateAsync();
@@ -660,6 +670,8 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
               </View>
 
               <TouchableOpacity
+                testID="check-updates-button"
+                accessibilityLabel="Check for App Updates"
                 style={styles.checkUpdateBtn}
                 onPress={handleCheckForUpdates}
                 disabled={checkingUpdate}

@@ -11,10 +11,12 @@ export function getProxyImageUrl(url?: string | null): string {
   if (!url) return '';
   const trimmed = url.trim();
   if (Platform.OS === 'web' && (trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
-    // If the image is hosted on third-party aggregators that restrict web Referer or CORS:
-    if (trimmed.includes('mangaread.org') || trimmed.includes('wp-content')) {
-      return `http://127.0.0.1:8089/?url=${encodeURIComponent(trimmed)}`;
+    // Avoid double-proxying or proxying localhost/blob
+    if (trimmed.includes('127.0.0.1:8089') || trimmed.includes('localhost:8089') || trimmed.startsWith('blob:')) {
+      return trimmed;
     }
+    // Route all remote extension and 18+ images through local dev proxy on Web to bypass browser CORS / hotlink protection
+    return `http://127.0.0.1:8089/?url=${encodeURIComponent(trimmed)}`;
   }
   return trimmed;
 }
