@@ -56,7 +56,7 @@ export const ReaderOverlay: React.FC<ReaderOverlayProps> = ({
       <View style={styles.topBar}>
         <SafeAreaView style={styles.topSafeArea}>
           <View style={styles.topContent}>
-            <TouchableOpacity onPress={onBack} style={styles.iconButton}>
+            <TouchableOpacity onPress={onBack} style={styles.iconButton} testID="reader-back-button" accessibilityLabel="Back to Manga">
               <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
 

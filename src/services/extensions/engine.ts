@@ -12,6 +12,21 @@ async function fetchWithDnsFallback(
   options?: RequestInit,
   timeoutMs: number = 7000
 ): Promise<Response> {
+  // On local web dev runner, route through local proxy to bypass browser CORS completely
+  if (
+    typeof window !== 'undefined' &&
+    window.location &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ) {
+    try {
+      const localProxyUrl = `http://127.0.0.1:8089/?url=${encodeURIComponent(url)}`;
+      const lRes = await fetch(localProxyUrl, { ...options });
+      if (lRes.ok) return lRes;
+    } catch (lErr) {
+      // fallback to normal fetch
+    }
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 

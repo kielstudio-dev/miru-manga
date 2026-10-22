@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
+import { getProxyImageUrl } from '../../utils/imageProxy';
 
 interface ZoomableImageProps {
   uri: string;
@@ -161,7 +162,7 @@ export const ZoomableImage: React.FC<ZoomableImageProps> = ({
         <Animated.View style={[styles.imageWrapper, animatedStyle]}>
           <Image
             source={{
-              uri: currentUri,
+              uri: getProxyImageUrl(currentUri),
               headers: imageHeaders,
             }}
             style={styles.image}

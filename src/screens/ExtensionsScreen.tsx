@@ -40,6 +40,7 @@ import {
 } from '../services/storage';
 import { colors } from '../theme/colors';
 import { getCachedCatalog, setCachedCatalog } from '../services/catalogCache';
+import { getProxyImageUrl } from '../utils/imageProxy';
 
 const ONLINE_CATEGORIES = [
   { id: 'views', label: '🔥 Top' },
@@ -549,7 +550,7 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                     <View style={[styles.browseCardCoverWrapper, isBookmarked && styles.browseCardCoverWrapperBookmarked]}>
                       <Image
                         source={{
-                          uri: item.coverUrl,
+                          uri: getProxyImageUrl(item.coverUrl),
                           headers: {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                             ...(item.coverUrl.match(/https?:\/\/[^\/]+/)
@@ -641,7 +642,7 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                     <View style={styles.quickModalMangaHeader}>
                       <Image
                         source={{
-                          uri: selectedQuickManga.coverUrl,
+                          uri: getProxyImageUrl(selectedQuickManga.coverUrl),
                           headers: {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                             ...(selectedQuickManga.coverUrl.match(/https?:\/\/[^\/]+/)

@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { supabase } from './supabase';
 import { setUserPro } from './monetization';
@@ -15,14 +16,16 @@ export interface AuthProfile {
 }
 
 // Configure Native Google Play Services Sign-In
-try {
-  GoogleSignin.configure({
-    webClientId: GOOGLE_WEB_CLIENT_ID,
-    scopes: ['profile', 'email'],
-    offlineAccess: true,
-  });
-} catch (err) {
-  console.warn('[Auth] GoogleSignin configure error:', err);
+if (Platform.OS !== 'web') {
+  try {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      scopes: ['profile', 'email'],
+      offlineAccess: true,
+    });
+  } catch (err) {
+    console.warn('[Auth] GoogleSignin configure error:', err);
+  }
 }
 
 /**

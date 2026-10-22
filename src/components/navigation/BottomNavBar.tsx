@@ -73,6 +73,7 @@ export const BottomNavBar = React.memo<BottomNavBarProps>(({
           return (
             <TouchableOpacity
               key={tab.id}
+              testID={`bottom-tab-${tab.id}`}
               style={styles.tabButton}
               onPress={() => onSelectTab(tab.id)}
               delayPressIn={0}

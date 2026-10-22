@@ -22,6 +22,7 @@ import Animated, {
 import { Page } from '../../types';
 import { EdgeHandleDrawer } from './EdgeHandleDrawer';
 import { colors } from '../../theme/colors';
+import { getProxyImageUrl } from '../../utils/imageProxy';
 
 interface WebtoonReaderProps {
   pages: Page[];
@@ -93,7 +94,7 @@ const WebtoonPageItem: React.FC<{
     <View style={[styles.pageWrapper, { width: SCREEN_WIDTH, minHeight: pageHeight }]}>
       <Image
         source={{
-          uri: currentUrl,
+          uri: getProxyImageUrl(currentUrl),
           headers: imageHeaders,
         }}
         style={{

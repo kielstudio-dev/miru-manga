@@ -23,6 +23,7 @@ import {
 } from '../services/downloads';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
+import { getProxyImageUrl } from '../utils/imageProxy';
 
 interface MangaDetailScreenProps {
   manga: Manga;
@@ -773,7 +774,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       <View style={styles.heroSection}>
         <Image
           source={{
-            uri: currentManga.coverUrl,
+            uri: getProxyImageUrl(currentManga.coverUrl),
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
               ...(currentManga.coverUrl.match(/https?:\/\/[^\/]+/)
@@ -987,7 +988,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       <SafeAreaView style={styles.safeArea}>
         {/* Top Header Bar */}
         <View style={styles.headerBar}>
-          <TouchableOpacity onPress={onBack} style={styles.headerBtn}>
+          <TouchableOpacity onPress={onBack} style={styles.headerBtn} testID="detail-back-button" accessibilityLabel="Back to Catalog">
             <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>

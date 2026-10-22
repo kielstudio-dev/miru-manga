@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Manga } from '../../types';
 import { colors } from '../../theme/colors';
+import { getProxyImageUrl } from '../../utils/imageProxy';
 
 interface MangaCardProps {
   manga: Manga;
@@ -43,7 +44,7 @@ export const MangaCard = React.memo<MangaCardProps>(
       <View style={styles.imageContainer}>
         <Image
           source={{
-            uri: manga.coverUrl,
+            uri: getProxyImageUrl(manga.coverUrl),
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
               ...(manga.coverUrl.match(/https?:\/\/[^\/]+/)
