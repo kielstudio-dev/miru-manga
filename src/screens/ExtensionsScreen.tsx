@@ -31,6 +31,7 @@ import {
 } from '../services/extensions/manager';
 import { Manga, ReaderSettings } from '../types';
 import { sourceRegistry } from '../services/sources/registry';
+import { createSourceFromManifest } from '../services/extensions/engine';
 import {
   saveManga,
   getMangaById,
@@ -286,7 +287,11 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
   // Browse titles from an installed extension
   const handleBrowseSource = (ext: ExtensionManifest) => {
     setBrowseSearchQuery('');
-    const src = sourceRegistry.get(ext.id);
+    let src = sourceRegistry.get(ext.id);
+    if (!src) {
+      src = createSourceFromManifest(ext);
+      sourceRegistry.register(src);
+    }
     const cats = src?.getCategories ? src.getCategories() : ONLINE_CATEGORIES;
     const initialCat = cats[0]?.id || 'views';
     setBrowseCategory(initialCat);
@@ -298,7 +303,11 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
   const fetchBrowsingTitles = useCallback(
     async (cat: string, page: number = 1) => {
       if (!browsingExtension) return;
-      const source = sourceRegistry.get(browsingExtension.id);
+      let source = sourceRegistry.get(browsingExtension.id);
+      if (!source) {
+        source = createSourceFromManifest(browsingExtension);
+        sourceRegistry.register(source);
+      }
       if (!source) return;
 
       try {

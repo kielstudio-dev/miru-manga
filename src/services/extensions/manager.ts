@@ -270,12 +270,12 @@ export const COMMUNITY_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
 
   // 1.5. Community Verified Global & Multilingual Extensions (Spanish, French, Indonesian, Italian, English)
   {
-    id: 'fr-leelmanga',
+    id: 'fr-lelmanga',
     name: 'Lelmanga (French)',
     version: '1.4.0',
     lang: 'FR',
     icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/lelmanga/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://www.leelmanga.com',
+    baseUrl: 'https://www.lelmanga.com',
     type: 'madara',
     description: 'Premier French manga and webtoon scanlations with day-1 chapter releases.',
   },

@@ -114,6 +114,7 @@ export class DynamicMadaraSource implements ISource {
   isNsfw: boolean = false;
   private flameCatalogCache: Manga[] | null = null;
   private flameFetchPromise: Promise<Manga[]> | null = null;
+  private workingCatalogPrefix: string | null = null;
 
   constructor(manifest: ExtensionManifest) {
     this.id = manifest.id;
@@ -169,93 +170,172 @@ export class DynamicMadaraSource implements ISource {
    * Universal HTML parser to extract manga items from any Madara / webtoon HTML page
    */
   parseMangaListHtml(html: string): Manga[] {
-    const linkRegex = /<a\s+([^>]*?)href=["'](?:https?:\/\/[^\/"'>]+)?\/(?:manga|series|comic|comics|webtoon|manhwa|scan|project|titre)\/([^"'\/#?]+)\/?[^"']*["']([^>]*)>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a\s+([^>]*?)href=["'](?:https?:\/\/[^\/"'>]+)?\/(manga|mangas|series|comic|comics|comic-book|webtoon|webtoons|manhwa|manhua|scan|scans|project|projects|titre|titres|read|lecture|capitulo|oeuvre|catalogue)\/([^"'?#]+?)["']([^>]*)>([\s\S]*?)<\/a>/gi;
     const mangaLinks = [...html.matchAll(linkRegex)];
 
     const BADGES = new Set([
-      'SS', 'HOT', 'NEW', 'RAW', 'COMPLETED', 'UP', '18+', 'TRENDING', 'HOT MANGA', 'POPULAR', 'TOP', 'BEST', 'RECOMMENDED'
+      'SS', 'HOT', 'NEW', 'RAW', 'COMPLETED', 'UP', '18+', 'TRENDING', 'HOT MANGA', 'POPULAR', 'TOP', 'BEST', 'RECOMMENDED',
+      '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'
     ]);
 
-    const seen = new Set<string>();
-    const results: Manga[] = [];
+    const itemsMap = new Map<string, Manga>();
+
+    const cleanTitleStr = (raw: string): string => {
+      if (!raw) return '';
+      let t = raw
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&#8217;/g, "'")
+        .replace(/&#8216;/g, "'")
+        .replace(/&rsquo;/g, "'")
+        .replace(/&lsquo;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&hellip;/g, '...')
+        .replace(/&#8211;/g, '-')
+        .replace(/&#8212;/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Strip leading ranking numbers like "1 I'm an Evil God"
+      t = t.replace(/^\d+\s+/, '');
+      // Strip trailing chapter indicators like "Chapitre 110", "Chapter 38", "Capitulo 14"
+      t = t.replace(/\s+(?:Chapitre|Chapter|Capítulo|Cap|Ch|Ep|Episode)\s*\d+.*$/i, '');
+      return t.trim();
+    };
 
     for (const m of mangaLinks) {
-      const attrs = (m[1] || '') + ' ' + (m[3] || '');
-      const slug = m[2];
-      if (!slug || ['comics', 'series', 'manga', 'webtoon', 'genre', 'genres', 'author', 'bookmark', 'bookmarks'].includes(slug) || slug.includes('?') || slug.includes('=') || seen.has(slug)) continue;
-      seen.add(slug);
+      let slug = m[3].replace(/\/+$/, '');
+      if (
+        !slug ||
+        ['comics', 'series', 'manga', 'webtoon', 'genre', 'genres', 'author', 'bookmark', 'bookmarks', 'page', 'catalogue', 'list-mode', 'grid-mode', 'view-mode', 'filter', 'search'].includes(slug) ||
+        slug.includes('?') ||
+        slug.includes('=')
+      ) {
+        continue;
+      }
 
-      const inner = m[4] || '';
+      // Exclude chapter links: /chapter-123, /capitulo-1, /ch-1, /\d+$
+      if (
+        /(?:^|\/)(?:chapter|chapitre|capitulo|cap|ch|ep|volume|tome|scan)[-_/\d]/i.test(slug) ||
+        /\/\d+$/.test(slug)
+      ) {
+        continue;
+      }
+
+      const attrs = (m[1] || '') + ' ' + (m[4] || '');
+      const inner = m[5] || '';
       const pos = m.index || 0;
       const context = html.slice(Math.max(0, pos - 250), Math.min(html.length, pos + 1000));
 
       let coverUrl = '';
       const imgMatch =
-        inner.match(/(?:data-src|data-lazy-src|data-cfsrc|src)=["']([^"']+)["']/i) ||
-        context.match(/(?:data-src|data-lazy-src|data-cfsrc)=["']([^"']+)["']/i) ||
+        inner.match(/(?:data-src|data-lazy-src|data-cfsrc|data-full-url|src)=["']([^"']+)["']/i) ||
+        context.match(/(?:data-src|data-lazy-src|data-cfsrc|data-full-url)=["']([^"']+)["']/i) ||
         context.match(/\bsrc=["']([^"']+)["']/i);
 
-      if (imgMatch && imgMatch[1] && !imgMatch[1].includes('dflazy') && !imgMatch[1].includes('blank.gif')) {
-        coverUrl = cleanSourceImageUrl(imgMatch[1], this.baseUrl);
-      }
-
-      // Title extraction: strictly filter out badge overlays like "SS", "HOT", "NEW"
-      let title = '';
-      const cleanInner = inner.replace(/<span\b[^>]*class=["'][^"']*badge[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, '');
-
-      // 1. Direct title attribute on <a> tag (e.g. <a title="Martial Peak">)
-      const aTitleMatch = attrs.match(/\btitle=["']([^"']+)["']/i);
-      if (aTitleMatch && !BADGES.has(aTitleMatch[1].toUpperCase().trim())) {
-        title = aTitleMatch[1].replace(/&#8217;/g, "'").replace(/&#8216;/g, "'").trim();
-      }
-
-      // 2. Heading inside cleanInner or post-title
-      if (!title || BADGES.has(title.toUpperCase().trim())) {
-        const headingMatch = cleanInner.match(/<(?:h[1-6]|span|div)\s+[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([^<]+)<\//i);
-        if (headingMatch && !BADGES.has(headingMatch[1].toUpperCase().trim())) {
-          title = headingMatch[1].replace(/&#8217;/g, "'").replace(/&#8216;/g, "'").trim();
+      if (imgMatch && imgMatch[1]) {
+        let u = imgMatch[1];
+        if (
+          !u.includes('dflazy') &&
+          !u.includes('blank.gif') &&
+          !u.includes('avatar') &&
+          !u.includes('logo') &&
+          !u.includes('no-image') &&
+          !u.endsWith('.js') &&
+          !u.startsWith('data:image')
+        ) {
+          coverUrl = cleanSourceImageUrl(u, this.baseUrl);
         }
       }
 
-      // 3. Clean image alt tag
-      if (!title || BADGES.has(title.toUpperCase().trim())) {
-        const altMatch = cleanInner.match(/alt=["']([^"']+)["']/i) || context.match(/alt=["']([^"']+)["']/i);
-        if (altMatch && !BADGES.has(altMatch[1].toUpperCase().trim())) {
-          const rawAlt = altMatch[1].replace(/^(?:Read\s+)?(?:Manga|Manhua|Manhwa)\s+/i, '').replace(/&#8217;/g, "'").trim();
-          if (rawAlt.length > 2 && !BADGES.has(rawAlt.toUpperCase())) {
-            title = rawAlt;
+      // Check srcset if coverUrl still empty
+      if (!coverUrl) {
+        const srcsetMatch = inner.match(/srcset=["']([^"']+)["']/i) || context.match(/srcset=["']([^"']+)["']/i);
+        if (srcsetMatch && srcsetMatch[1]) {
+          const firstSrc = srcsetMatch[1].split(',')[0].trim().split(' ')[0];
+          if (firstSrc && !firstSrc.includes('dflazy') && !firstSrc.includes('avatar') && !firstSrc.includes('logo')) {
+            coverUrl = cleanSourceImageUrl(firstSrc, this.baseUrl);
           }
         }
       }
 
-      // 4. Context title
-      if (!title || BADGES.has(title.toUpperCase().trim())) {
-        const ctxTitle = context.match(/<(?:h[1-6]|a)[^>]*title=["']([^"']+)["']/i);
-        if (ctxTitle && !BADGES.has(ctxTitle[1].toUpperCase().trim())) {
-          title = ctxTitle[1].replace(/&#8217;/g, "'").trim();
+      // Title extraction
+      let title = '';
+      const cleanInner = inner.replace(/<span\b[^>]*class=["'][^"']*badge[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, '');
+
+      // 1. Title attribute on <a> tag
+      const aTitleMatch = attrs.match(/\btitle=["']([^"']+)["']/i);
+      if (aTitleMatch) {
+        const cand = cleanTitleStr(aTitleMatch[1]);
+        if (cand && !BADGES.has(cand.toUpperCase())) {
+          title = cand;
+        }
+      }
+
+      // 2. Heading inside cleanInner or post-title
+      if (!title || BADGES.has(title.toUpperCase())) {
+        const headingMatch = cleanInner.match(/<(?:h[1-6]|span|div)\s+[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([\s\S]*?)<\//i);
+        if (headingMatch) {
+          const cand = cleanTitleStr(headingMatch[1]);
+          if (cand && !BADGES.has(cand.toUpperCase())) {
+            title = cand;
+          }
+        }
+      }
+
+      // 3. Clean image alt tag
+      if (!title || BADGES.has(title.toUpperCase())) {
+        const altMatch = cleanInner.match(/alt=["']([^"']+)["']/i) || context.match(/alt=["']([^"']+)["']/i);
+        if (altMatch) {
+          const rawAlt = altMatch[1].replace(/^(?:Read\s+)?(?:Manga|Manhua|Manhwa)\s+/i, '');
+          const cand = cleanTitleStr(rawAlt);
+          if (cand && cand.length > 2 && !BADGES.has(cand.toUpperCase())) {
+            title = cand;
+          }
+        }
+      }
+
+      // 4. Text inside cleanInner
+      if (!title || BADGES.has(title.toUpperCase())) {
+        const cand = cleanTitleStr(cleanInner);
+        if (cand && cand.length > 2 && !BADGES.has(cand.toUpperCase())) {
+          title = cand;
         }
       }
 
       // 5. Fallback to clean slug
-      if (!title || BADGES.has(title.toUpperCase().trim())) {
-        title = slug.replace(/-\w{8}$/, '').replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      if (!title || BADGES.has(title.toUpperCase())) {
+        const baseSlug = slug.split('/').pop() || slug;
+        title = baseSlug.replace(/-\w{8}$/, '').replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
       }
 
-      results.push({
-        id: `${this.id}::${slug}`,
-        title: title,
-        coverUrl: coverUrl || 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=600',
-        author: this.name,
-        description: '',
-        status: 'ongoing',
-        sourceId: this.id,
-        sourceName: this.name,
-        addedAt: Date.now(),
-        isNsfw: this.isNsfw,
-      });
+      if (itemsMap.has(slug)) {
+        const existing = itemsMap.get(slug)!;
+        // Upgrade title if current match provides a better, non-slug title
+        const baseSlug = (slug.split('/').pop() || slug).replace(/[-_]/g, ' ').toLowerCase();
+        if (existing.title.toLowerCase() === baseSlug && title.toLowerCase() !== baseSlug) {
+          existing.title = title;
+        }
+        if ((!existing.coverUrl || existing.coverUrl.includes('unsplash')) && coverUrl) {
+          existing.coverUrl = coverUrl;
+        }
+      } else {
+        itemsMap.set(slug, {
+          id: `${this.id}::${slug}`,
+          title: title,
+          coverUrl: coverUrl || 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=600',
+          author: this.name,
+          description: '',
+          status: 'ongoing',
+          sourceId: this.id,
+          sourceName: this.name,
+          addedAt: Date.now(),
+          isNsfw: this.isNsfw,
+        });
+      }
     }
 
-    return results;
+    return Array.from(itemsMap.values());
   }
 
   async getMangaList(page: number = 1, category: string = 'views'): Promise<Manga[]> {
@@ -285,43 +365,93 @@ export class DynamicMadaraSource implements ISource {
         return all.slice(start, start + PAGE_SIZE);
       }
 
-      let path = '';
       const catLower = (category || 'views').toLowerCase();
 
+      // If page > 1 and we already discovered a working catalog prefix on page 1:
+      if (page > 1 && this.workingCatalogPrefix) {
+        const pfx = this.workingCatalogPrefix;
+        let pUrl = '';
+        if (pfx === '/manga/' || pfx.includes('/manga/')) {
+          pUrl = `${this.baseUrl}/manga/page/${page}/?m_orderby=${catLower}`;
+        } else if (pfx === '/series/' || pfx.includes('/series/')) {
+          pUrl = `${this.baseUrl}/series/page/${page}/?m_orderby=${catLower}`;
+        } else if (pfx.includes('/comics')) {
+          pUrl = `${this.baseUrl}/comics?page=${page}`;
+        } else if (pfx.includes('/browse')) {
+          pUrl = `${this.baseUrl}/browse?page=${page}`;
+        } else {
+          pUrl = `${this.baseUrl}/?page=${page}`;
+        }
+        try {
+          const res = await fetchWithDnsFallback(pUrl, this.headers);
+          if (res.ok) {
+            const html = await res.text();
+            const items = this.parseMangaListHtml(html);
+            if (items.length > 0) return items;
+          }
+        } catch (e) {}
+      }
+
+      let primaryPath = '';
       if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
-        path = catLower === 'ranking' ? '/series-ranking' : (page === 1 ? '/comics' : `/comics?page=${page}`);
+        primaryPath = catLower === 'ranking' ? '/series-ranking' : (page === 1 ? '/comics' : `/comics?page=${page}`);
       } else if (catLower === 'views' || catLower === 'popular' || catLower === 'top') {
-        path = page === 1 ? '/manga/?m_orderby=views' : `/manga/page/${page}/?m_orderby=views`;
+        primaryPath = page === 1 ? '/manga/?m_orderby=views' : `/manga/page/${page}/?m_orderby=views`;
       } else if (catLower === 'latest' || catLower === 'update') {
-        path = page === 1 ? '/manga/?m_orderby=latest' : `/manga/page/${page}/?m_orderby=latest`;
+        primaryPath = page === 1 ? '/manga/?m_orderby=latest' : `/manga/page/${page}/?m_orderby=latest`;
       } else if (catLower === 'new-manga' || catLower === 'new') {
-        path = page === 1 ? '/manga/?m_orderby=new-manga' : `/manga/page/${page}/?m_orderby=new-manga`;
+        primaryPath = page === 1 ? '/manga/?m_orderby=new-manga' : `/manga/page/${page}/?m_orderby=new-manga`;
       } else if (catLower === 'rating') {
-        path = page === 1 ? '/manga/?m_orderby=rating' : `/manga/page/${page}/?m_orderby=rating`;
+        primaryPath = page === 1 ? '/manga/?m_orderby=rating' : `/manga/page/${page}/?m_orderby=rating`;
       } else if (catLower === 'alphabet') {
-        path = page === 1 ? '/manga/?m_orderby=alphabet' : `/manga/page/${page}/?m_orderby=alphabet`;
+        primaryPath = page === 1 ? '/manga/?m_orderby=alphabet' : `/manga/page/${page}/?m_orderby=alphabet`;
       } else {
-        path = page === 1 ? `/genres/${catLower}/` : `/genres/${catLower}/page/${page}/`;
+        primaryPath = page === 1 ? `/genres/${catLower}/` : `/genres/${catLower}/page/${page}/`;
       }
 
-      let url = `${this.baseUrl}${path}`;
-      let res = await fetchWithDnsFallback(url, this.headers);
+      // 1. Try primary path
+      try {
+        const url = `${this.baseUrl}${primaryPath}`;
+        const res = await fetchWithDnsFallback(url, this.headers);
+        if (res.ok) {
+          const html = await res.text();
+          const items = this.parseMangaListHtml(html);
+          if (items.length > 0) {
+            this.workingCatalogPrefix = primaryPath.includes('/manga/') ? '/manga/' : '/comics/';
+            return items;
+          }
+        }
+      } catch (e) {}
 
-      if (res.status === 404 && path.includes('/genres/')) {
-        const altPath = page === 1 ? `/manga-genre/${catLower}/` : `/manga-genre/${catLower}/page/${page}/`;
-        url = `${this.baseUrl}${altPath}`;
-        res = await fetchWithDnsFallback(url, this.headers);
+      // 2. Fallback chain for Page 1 (handles sites whose catalog is on /series/, /comics/, /browse, or homepage /)
+      if (page === 1) {
+        const fallbackPaths = [
+          `/series/?m_orderby=${catLower}`,
+          '/manga/',
+          '/series/',
+          '/comics/',
+          '/browse',
+          '/'
+        ];
+
+        for (const fbPath of fallbackPaths) {
+          if (fbPath === primaryPath) continue;
+          try {
+            const url = `${this.baseUrl}${fbPath}`;
+            const res = await fetchWithDnsFallback(url, this.headers);
+            if (res.ok) {
+              const html = await res.text();
+              const items = this.parseMangaListHtml(html);
+              if (items.length > 0) {
+                this.workingCatalogPrefix = fbPath;
+                return items;
+              }
+            }
+          } catch (e) {}
+        }
       }
 
-      if (res.status === 404 && path.includes('/manga/')) {
-        const altSeriesPath = path.replace('/manga/', '/series/');
-        url = `${this.baseUrl}${altSeriesPath}`;
-        res = await fetchWithDnsFallback(url, this.headers);
-      }
-
-      if (!res.ok) throw new Error(`HTTP ${res.status} from ${this.baseUrl}`);
-      const html = await res.text();
-      return this.parseMangaListHtml(html);
+      return [];
     } catch (err: any) {
       console.warn(`[DynamicMadaraSource: ${this.name}] getMangaList failed:`, err?.message || err);
       return [];
@@ -372,15 +502,34 @@ export class DynamicMadaraSource implements ISource {
 
   async getMangaDetails(mangaId: string): Promise<Manga> {
     const slug = mangaId.replace(`${this.id}::`, '');
-    let url = slug.includes('/') ? `${this.baseUrl}/${slug}/` : `${this.baseUrl}/manga/${slug}/`;
+    let urlsToTry: string[] = [];
     if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
-      url = `${this.baseUrl}/comics/${slug}`;
+      urlsToTry = [`${this.baseUrl}/comics/${slug}`, `${this.baseUrl}/${slug}`];
     } else if (this.baseUrl.includes('flamecomics')) {
-      url = `${this.baseUrl}/series/${slug}`;
+      urlsToTry = [`${this.baseUrl}/series/${slug}`, `${this.baseUrl}/${slug}`];
+    } else {
+      urlsToTry = [
+        `${this.baseUrl}/manga/${slug}/`,
+        `${this.baseUrl}/series/${slug}/`,
+        `${this.baseUrl}/comics/${slug}/`,
+        `${this.baseUrl}/${slug}/`
+      ];
     }
-    const res = await fetchWithDnsFallback(url, this.headers);
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching manga details`);
-    const html = await res.text();
+
+    let res: Response | null = null;
+    let html = '';
+    for (const u of urlsToTry) {
+      try {
+        const r = await fetchWithDnsFallback(u, this.headers);
+        if (r.ok) {
+          res = r;
+          html = await r.text();
+          break;
+        }
+      } catch (e) {}
+    }
+
+    if (!res || !res.ok) throw new Error(`HTTP fetching manga details failed for ${slug}`);
 
     const titleMatch =
       html.match(/<div class="post-title"[^>]*>[\s\S]*?<h1>([\s\S]*?)<\/h1>/i) ||
@@ -497,11 +646,18 @@ export class DynamicMadaraSource implements ISource {
 
   async getChapters(mangaId: string): Promise<Chapter[]> {
     const slug = mangaId.replace(`${this.id}::`, '');
-    let mangaUrl = slug.includes('/') ? `${this.baseUrl}/${slug}/` : `${this.baseUrl}/manga/${slug}/`;
+    let candidateUrls: string[] = [];
     if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
-      mangaUrl = `${this.baseUrl}/comics/${slug}`;
+      candidateUrls = [`${this.baseUrl}/comics/${slug}`, `${this.baseUrl}/${slug}`];
     } else if (this.baseUrl.includes('flamecomics')) {
-      mangaUrl = `${this.baseUrl}/series/${slug}`;
+      candidateUrls = [`${this.baseUrl}/series/${slug}`, `${this.baseUrl}/${slug}`];
+    } else {
+      candidateUrls = [
+        `${this.baseUrl}/manga/${slug}/`,
+        `${this.baseUrl}/series/${slug}/`,
+        `${this.baseUrl}/comics/${slug}/`,
+        `${this.baseUrl}/${slug}/`
+      ];
     }
 
     interface RawChapterItem {
@@ -512,34 +668,37 @@ export class DynamicMadaraSource implements ISource {
 
     let rawChapters: RawChapterItem[] = [];
 
-    // In Madara WordPress themes, the main HTML only renders a truncated preview of recent chapters,
-    // while the POST /ajax/chapters/ endpoint returns the full complete list from Chapter 1 to latest!
-    try {
-      const ajaxRes = await fetchWithDnsFallback(`${mangaUrl.replace(/\/+$/, '')}/ajax/chapters/`, {
-        ...this.headers,
-        'X-Requested-With': 'XMLHttpRequest',
-      }, { method: 'POST' });
-      if (ajaxRes.ok) {
-        const ajaxHtml = await ajaxRes.text();
-        const ajaxMatches = [
-          ...ajaxHtml.matchAll(
-            /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>(?:[\s\S]*?<span\s+class="chapter-release-date"[^>]*>([\s\S]*?)<\/span>)?/gi
-          ),
-        ];
-        if (ajaxMatches.length > 0) {
-          rawChapters = ajaxMatches.map((m) => ({
-            url: m[1].trim(),
-            rawInner: m[2],
-            rawDate: m[3] ? m[3].replace(/<[^>]+>/g, '').trim() : undefined,
-          }));
-        }
-      }
-    } catch (e) {
-      // Fall back to main page if AJAX fails
-    }
+    for (const mangaUrl of candidateUrls) {
+      if (rawChapters.length > 0) break;
 
-    // Fallback to scraping main manga page if AJAX returned 0
-    if (rawChapters.length === 0) {
+      // In Madara WordPress themes, the main HTML only renders a truncated preview of recent chapters,
+      // while the POST /ajax/chapters/ endpoint returns the full complete list from Chapter 1 to latest!
+      try {
+        const ajaxRes = await fetchWithDnsFallback(`${mangaUrl.replace(/\/+$/, '')}/ajax/chapters/`, {
+          ...this.headers,
+          'X-Requested-With': 'XMLHttpRequest',
+        }, { method: 'POST' });
+        if (ajaxRes.ok) {
+          const ajaxHtml = await ajaxRes.text();
+          const ajaxMatches = [
+            ...ajaxHtml.matchAll(
+              /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>(?:[\s\S]*?<span\s+class="chapter-release-date"[^>]*>([\s\S]*?)<\/span>)?/gi
+            ),
+          ];
+          if (ajaxMatches.length > 0) {
+            rawChapters = ajaxMatches.map((m) => ({
+              url: m[1].trim(),
+              rawInner: m[2],
+              rawDate: m[3] ? m[3].replace(/<[^>]+>/g, '').trim() : undefined,
+            }));
+            break;
+          }
+        }
+      } catch (e) {
+        // Fall back to main page if AJAX fails
+      }
+
+      // Fallback to scraping main manga page if AJAX returned 0
       try {
         const res = await fetchWithDnsFallback(mangaUrl, this.headers);
         if (res.ok) {
@@ -556,8 +715,9 @@ export class DynamicMadaraSource implements ISource {
               rawInner: m[2],
               rawDate: m[3] ? m[3].replace(/<[^>]+>/g, '').trim() : undefined,
             }));
+            break;
           } else {
-            // 2. Modern chapter links for Asura Scans, Flame Comics, and custom themes
+            // 2. Modern chapter links for Asura Scans, Flame Comics, LeerCapitulo, and custom themes
             const generalMatches = [
               ...html.matchAll(
                 /<a\s+[^>]*href=["']([^"']*(?:chapter|chapitre|capitulo|episode|\/comics\/[^\/]+\/chapter|\/series\/\d+\/[a-f0-9]+|\/leer\/|\/read\/|\/ch-|\/c\d+)[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi
@@ -566,7 +726,6 @@ export class DynamicMadaraSource implements ISource {
             for (const m of generalMatches) {
               const href = m[1].trim();
               const inner = m[2];
-              // Skip top/bottom navigation buttons ("First Chapter", "Latest Chapter")
               if (
                 inner.includes('data-continue-label') ||
                 inner.includes('First Chapter') ||
@@ -579,11 +738,10 @@ export class DynamicMadaraSource implements ISource {
                 rawInner: inner,
               });
             }
+            if (rawChapters.length > 0) break;
           }
         }
-      } catch (err) {
-        console.error(`[DynamicMadaraSource: ${this.name}] getChapters fetch error:`, err);
-      }
+      } catch (err) {}
     }
 
     const chapters: Chapter[] = [];
@@ -795,18 +953,46 @@ export class DynamicMadaraSource implements ISource {
       }
     }
 
-    // Strategy D: General chapter images for modern webtoon sites like Asura and Flame Comics
+    // Strategy D: General chapter images for modern webtoon sites, LeerCapitulo, and custom readers
     if (rawItems.length === 0) {
-      const allImgs = [...html.matchAll(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi)];
+      const allImgs = [...html.matchAll(/<img\b[^>]*>/gi)];
       for (const m of allImgs) {
-        let u = m[1];
-        if (u && (u.includes('chapter') || u.includes('asura-images') || u.includes('/upload/') || u.includes('/manga/') || u.includes('flamecomics.xyz/uploads'))) {
-          if (u.includes('read_on_flame') || u.includes('thumbnail.png') || u.includes('cover.png')) continue;
+        const tag = m[0];
+        const srcMatch = tag.match(/(?:data-src|data-lazy-src|data-cfsrc|data-full-url|src)\s*=\s*["']([^"']+)["']/i);
+        if (!srcMatch) continue;
+        let u = srcMatch[1].trim();
+        if (
+          u.includes('blank.gif') ||
+          u.includes('dflazy') ||
+          u.includes('avatar') ||
+          u.includes('logo') ||
+          u.includes('read_on_flame') ||
+          u.includes('thumbnail.png') ||
+          u.includes('cover.png') ||
+          u.startsWith('data:image')
+        ) {
+          continue;
+        }
+
+        const altMatch = tag.match(/alt=["']([^"']*(?:pag|page)[^"']*)["']/i);
+        const isCandidate =
+          altMatch ||
+          u.includes('chapter') ||
+          u.includes('asura-images') ||
+          u.includes('/upload/') ||
+          u.includes('/manga/') ||
+          u.includes('/storage/') ||
+          u.includes('flamecomics.xyz/uploads') ||
+          /\.(?:jpe?g|png|webp|avif)(?:\?.*)?$/i.test(u);
+
+        if (isCandidate) {
           if (u.includes('_next/image') && u.includes('url=')) {
             const uMatch = u.match(/url=([^&]+)/);
             if (uMatch) u = decodeURIComponent(uMatch[1]);
           }
-          addUrl(u.startsWith('http') ? u : `${this.baseUrl}${u}`);
+          const pageNumMatch = altMatch ? altMatch[1].match(/(?:pag|page|pagina)\s*(\d+)/i) : null;
+          const explicitIdx = pageNumMatch ? parseInt(pageNumMatch[1], 10) : null;
+          addUrl(u.startsWith('http') ? u : `${this.baseUrl}${u}`, explicitIdx);
         }
       }
     }
