@@ -3,8 +3,21 @@ import { DynamicMadaraSource, createSourceFromManifest } from './engine';
 import { sourceRegistry } from '../sources/registry';
 import { getDatabase, safeDbRun } from '../storage';
 
+// Dedicated Series Manifest: Wistoria: Wand and Sword (Direct Day-1 Scans)
+export const WISTORIA_EXTENSION_MANIFEST: ExtensionManifest = {
+  id: 'wistoria-scans',
+  name: 'Wistoria: Wand & Sword (Fast Scans)',
+  version: '1.4.0',
+  lang: 'EN',
+  icon: 'https://w9.wistoriaswandandsword.com/wp-content/uploads/2024/07/Wistorias-Wand-and-Sword-cover.webp',
+  baseUrl: 'https://w9.wistoriaswandandsword.com',
+  type: 'dedicated-series',
+  description: 'Direct dedicated high-speed scans for Wistoria: Wand and Sword (Tsue to Tsurugi no Wistoria), featuring the latest released chapters (Ch. 69+).',
+};
+
 // Safe, open-source default extensions shipped with the app bundle (compliant with Play Store policies)
 export const DEFAULT_REPO_EXTENSIONS: ExtensionManifest[] = [
+  WISTORIA_EXTENSION_MANIFEST,
   {
     id: 'peppercarrot-open',
     name: 'Pepper & Carrot (Open)',
@@ -156,6 +169,9 @@ export const COMMUNITY_NSFW_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
 ];
 
 export const COMMUNITY_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
+  // 0. Dedicated Popular Series (Direct day-1 releases)
+  WISTORIA_EXTENSION_MANIFEST,
+
   // 1. Top Verified Madara Scanlation Providers
   {
     id: 'asura-comic',
@@ -659,13 +675,27 @@ export async function getInstalledExtensions(): Promise<ExtensionManifest[]> {
       const parsed: ExtensionManifest[] = JSON.parse(row.value);
       // Clean out any defunct extensions (e.g. dead domains like manhuaus)
       const cleaned = parsed.filter((m) => !DEFUNCT_IDS.has(m.id));
-      if (cleaned.length !== parsed.length) {
+      // Auto-install wistoria-scans if not already registered
+      if (!cleaned.some((m) => m.id === WISTORIA_EXTENSION_MANIFEST.id)) {
+        cleaned.unshift({ ...WISTORIA_EXTENSION_MANIFEST, installed: true });
+      }
+      if (cleaned.length !== parsed.length || !parsed.some((m) => m.id === WISTORIA_EXTENSION_MANIFEST.id)) {
         await db.runAsync(
           `INSERT OR REPLACE INTO settings (key, value) VALUES ('installed_extensions', ?);`,
           [JSON.stringify(cleaned)]
         );
       }
       installedManifests = cleaned;
+    } else {
+      const initial = [
+        { ...WISTORIA_EXTENSION_MANIFEST, installed: true },
+        ...DEFAULT_REPO_EXTENSIONS.map((m) => ({ ...m, installed: true })),
+      ];
+      await db.runAsync(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES ('installed_extensions', ?);`,
+        [JSON.stringify(initial)]
+      );
+      installedManifests = initial;
     }
     return installedManifests;
   }, installedManifests);
@@ -836,5 +866,10 @@ export async function initializeInstalledExtensions(): Promise<void> {
   for (const manifest of installed) {
     const source = createSourceFromManifest(manifest);
     sourceRegistry.register(source);
+  }
+  // Ensure Wistoria dedicated source is registered in the live registry
+  if (!sourceRegistry.has(WISTORIA_EXTENSION_MANIFEST.id)) {
+    const wistoriaSource = createSourceFromManifest(WISTORIA_EXTENSION_MANIFEST);
+    sourceRegistry.register(wistoriaSource);
   }
 }

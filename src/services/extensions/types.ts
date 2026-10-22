@@ -1,4 +1,4 @@
-export type ExtensionType = 'madara' | 'mangastream' | 'mangadex' | 'custom';
+export type ExtensionType = 'madara' | 'mangastream' | 'mangadex' | 'dedicated-series' | 'custom';
 
 export interface ExtensionManifest {
   id: string;

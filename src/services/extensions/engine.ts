@@ -1365,9 +1365,239 @@ export class DynamicMangaDexSource implements ISource {
 }
 
 /**
+ * Dedicated Single-Series Scraper Engine
+ * Designed for dedicated scanlation project sites like w9.wistoriaswandandsword.com
+ * where a domain is solely focused on a single popular manga, providing immediate day-one
+ * chapter releases (e.g. Chapter 69+) before general aggregators upload them.
+ */
+export class DedicatedSeriesSource implements ISource {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  icon?: string;
+  isLocal = false;
+  baseUrl: string;
+  headers: Record<string, string>;
+
+  constructor(manifest: ExtensionManifest) {
+    this.id = manifest.id;
+    this.name = manifest.name;
+    this.description = manifest.description || `Dedicated source for ${manifest.name}`;
+    this.version = manifest.version;
+    this.icon = manifest.icon;
+    this.baseUrl = manifest.baseUrl.replace(/\/+$/, '');
+    this.headers = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Referer: `${this.baseUrl}/`,
+      ...manifest.headers,
+    };
+  }
+
+  getCategories(): { id: string; label: string }[] {
+    return [{ id: 'all', label: '🔥 All Chapters' }];
+  }
+
+  async getMangaList(page: number = 1, category?: string): Promise<Manga[]> {
+    if (page > 1) return [];
+    const item = await this.getMangaDetails(`${this.id}::main`);
+    return [item];
+  }
+
+  async getMangaDetails(mangaId: string): Promise<Manga> {
+    const defaultCover = `${this.baseUrl}/wp-content/uploads/2024/07/Wistorias-Wand-and-Sword-cover.webp`;
+    const defaultDesc =
+      "Will Serfort dreams of keeping his promise to his childhood friend by becoming a Magia Vende, one of the mighty magicians who sit atop the Wizard's Tower. However, he is unable to use even the simplest of magic spells, leaving him to fight dungeon monsters to earn credits at the Regarden Magical Academy. As if that weren't enough, he finds himself putting his sword skills to the test against a bullying professor!";
+
+    try {
+      const res = await fetchWithDnsFallback(this.baseUrl, this.headers);
+      if (res.ok) {
+        const html = await res.text();
+        const ogImage = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)?.[1];
+        const ogDesc = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i)?.[1];
+        const coverMatch = html.match(/<img[^>]+src=["']([^"']*(?:cover|poster|wp-content\/uploads)[^"']*)["']/i)?.[1];
+
+        return {
+          id: `${this.id}::main`,
+          title: "Wistoria: Wand and Sword",
+          altTitle: "杖と剣のウィストリア (Tsue to Tsurugi no Wistoria)",
+          coverUrl: ogImage || coverMatch || defaultCover,
+          author: "Omori Fujino / Aoi Toshi",
+          description: ogDesc ? ogDesc.replace(/&#039;/g, "'").trim() : defaultDesc,
+          status: "ongoing",
+          sourceId: this.id,
+          sourceName: this.name,
+          addedAt: Date.now(),
+        };
+      }
+    } catch (e) {
+      // Gracefully fall back to verified metadata
+    }
+
+    return {
+      id: `${this.id}::main`,
+      title: "Wistoria: Wand and Sword",
+      altTitle: "杖と剣のウィストリア (Tsue to Tsurugi no Wistoria)",
+      coverUrl: defaultCover,
+      author: "Omori Fujino / Aoi Toshi",
+      description: defaultDesc,
+      status: "ongoing",
+      sourceId: this.id,
+      sourceName: this.name,
+      addedAt: Date.now(),
+    };
+  }
+
+  async getChapters(mangaId: string): Promise<Chapter[]> {
+    const res = await fetchWithDnsFallback(this.baseUrl, {
+      ...this.headers,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching chapters from ${this.baseUrl}`);
+    const html = await res.text();
+
+    const aMatches = [...html.matchAll(/<a\s+[^>]*href=["']([^"']*(?:chapter|\/manga\/)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+    const chapters: Chapter[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < aMatches.length; i++) {
+      const m = aMatches[i];
+      let url = m[1].trim();
+      if (!url.startsWith('http')) {
+        url = `${this.baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      if (seen.has(url)) continue;
+      seen.add(url);
+
+      const spacedInner = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const chNumMatch = url.match(/chapter-?(\d+(?:\.\d+)?)/i) || spacedInner.match(/chapter\s*(\d+(?:\.\d+)?)/i);
+      if (chNumMatch) {
+        const chNum = parseFloat(chNumMatch[1]);
+        const dateMatch = spacedInner.match(/(\d+\s+(?:days?|hours?|mins?|weeks?|months?|years?)\s+ago)/i);
+        const releaseDate = dateMatch ? dateMatch[1] : '';
+        let title = spacedInner
+          .replace(/^(?:First Chapter|New Chapter)\s*/i, '')
+          .replace(/(?:\d+\s+(?:days?|hours?|mins?|weeks?|months?|years?)\s+ago)/gi, '')
+          .trim();
+        if (!title || !title.toLowerCase().includes('chapter')) {
+          title = `Chapter ${chNum}`;
+        }
+
+        chapters.push({
+          id: url,
+          mangaId: `${this.id}::main`,
+          chapterNumber: chNum,
+          title,
+          releaseDate,
+          isRead: false,
+          lastReadPageIndex: 0,
+          totalPages: 0,
+          sourceId: this.id,
+        });
+      }
+    }
+
+    // Canonical order: Chapter 1 -> Chapter N (ascending)
+    chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
+    return chapters;
+  }
+
+  async getPageList(chapterId: string): Promise<Page[]> {
+    const res = await fetchWithDnsFallback(chapterId, {
+      ...this.headers,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching chapter pages`);
+    const html = await res.text();
+
+    const imgTags = [...html.matchAll(/<img\b[^>]*>/gi)];
+    const pages: Page[] = [];
+    const seenUrls = new Set<string>();
+
+    for (const tagMatch of imgTags) {
+      const tag = tagMatch[0];
+      // Skip non-page images (header background, logos, avatars, ads, cover images)
+      if (
+        tag.includes('header-background') ||
+        tag.includes('logo') ||
+        tag.includes('avatar') ||
+        tag.includes('favicon') ||
+        tag.includes('ads') ||
+        tag.includes('cover')
+      ) {
+        continue;
+      }
+
+      const srcMatch = tag.match(/(?:data-src|data-lazy-src|src)\s*=\s*["']([^"']+)["']/i);
+      if (srcMatch) {
+        let u = srcMatch[1].replace(/[\r\n\t\s]/g, '').trim();
+        if (!u || u.startsWith('data:image')) continue;
+        if (u.startsWith('//')) u = `https:${u}`;
+        if (!seenUrls.has(u)) {
+          seenUrls.add(u);
+          pages.push({
+            index: pages.length,
+            url: u,
+          });
+        }
+      }
+    }
+
+    // Natural numeric sorting for page images (1.webp, 2.webp, ... 32.webp)
+    const numRegex = /\/(\d+)\.(?:webp|jpe?g|png|avif)(?:\?.*)?$/i;
+    const matchesNum = pages.every((p) => numRegex.test(p.url));
+    if (matchesNum && pages.length > 1) {
+      pages.sort((a, b) => {
+        const ma = a.url.match(numRegex);
+        const mb = b.url.match(numRegex);
+        if (ma && mb) {
+          return parseInt(ma[1], 10) - parseInt(mb[1], 10);
+        }
+        return a.index - b.index;
+      });
+      // Re-index sequentially
+      pages.forEach((p, idx) => {
+        p.index = idx;
+      });
+    }
+
+    if (pages.length === 0) {
+      throw new Error('This chapter has not yet been published with pages by the source provider.');
+    }
+
+    return pages;
+  }
+
+  async searchManga(query: string): Promise<Manga[]> {
+    const q = (query || '').toLowerCase().trim();
+    if (
+      !q ||
+      q.includes('wistoria') ||
+      q.includes('wand') ||
+      q.includes('sword') ||
+      q.includes('tsue') ||
+      q.includes('tsurugi') ||
+      q.includes('will') ||
+      q.includes('magic') ||
+      'wistoria: wand and sword'.includes(q)
+    ) {
+      const item = await this.getMangaDetails(`${this.id}::main`);
+      return [item];
+    }
+    return [];
+  }
+}
+
+/**
  * Universal source factory by manifest type
  */
 export function createSourceFromManifest(manifest: ExtensionManifest): ISource {
+  if (manifest.type === 'dedicated-series' || manifest.baseUrl.includes('wistoriaswandandsword.com')) {
+    return new DedicatedSeriesSource(manifest);
+  }
   if (manifest.type === 'mangadex') {
     return new DynamicMangaDexSource(manifest);
   }

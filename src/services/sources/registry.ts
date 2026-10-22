@@ -22,6 +22,10 @@ class SourceRegistry {
     return this.sources.get(sourceId);
   }
 
+  has(sourceId: string): boolean {
+    return this.sources.has(sourceId);
+  }
+
   getAll(): ISource[] {
     return Array.from(this.sources.values());
   }
