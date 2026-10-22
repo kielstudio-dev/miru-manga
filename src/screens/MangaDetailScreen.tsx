@@ -421,8 +421,29 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
           );
         if (needsFreshFetch) {
           const source = sourceRegistry.get(manga.sourceId) || sourceRegistry.getLocalSource();
-          chList = await source.getChapters(manga.id);
-          await saveChapters(manga.id, chList);
+          const freshList = await source.getChapters(manga.id);
+          if (freshList && freshList.length > 0) {
+            const sortedFresh = [...freshList].sort((a, b) => a.chapterNumber - b.chapterNumber);
+            const existingById = new Map<string, Chapter>();
+            const existingByNum = new Map<number, Chapter>();
+            chList.forEach((c) => {
+              existingById.set(c.id, c);
+              existingByNum.set(c.chapterNumber, c);
+            });
+            const merged = sortedFresh.map((ch) => {
+              const existing = existingById.get(ch.id) || existingByNum.get(ch.chapterNumber);
+              return {
+                ...ch,
+                isRead: Boolean(ch.isRead || existing?.isRead),
+                lastReadPageIndex:
+                  ch.lastReadPageIndex && ch.lastReadPageIndex > 0
+                    ? ch.lastReadPageIndex
+                    : existing?.lastReadPageIndex || 0,
+              };
+            });
+            await saveChapters(manga.id, merged, false);
+            chList = merged;
+          }
         }
         setChapters(chList);
         if (!userManuallyToggledSort.current) {
@@ -446,10 +467,37 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       if (source && source.getChapters) {
         const freshList = await source.getChapters(manga.id);
         if (freshList && freshList.length > 0) {
-          await saveChapters(manga.id, freshList);
-          setChapters(freshList);
+          // 1. Canonically sort chapters 1 -> N
+          const sortedFresh = [...freshList].sort((a, b) => a.chapterNumber - b.chapterNumber);
+
+          // 2. Merge with current state & memory to protect isRead and lastReadPageIndex
+          const currentById = new Map<string, Chapter>();
+          const currentByNum = new Map<number, Chapter>();
+          chapters.forEach((c) => {
+            currentById.set(c.id, c);
+            currentByNum.set(c.chapterNumber, c);
+          });
+
+          const merged = sortedFresh.map((ch) => {
+            const existing = currentById.get(ch.id) || currentByNum.get(ch.chapterNumber);
+            return {
+              ...ch,
+              isRead: Boolean(ch.isRead || existing?.isRead),
+              lastReadPageIndex:
+                ch.lastReadPageIndex && ch.lastReadPageIndex > 0
+                  ? ch.lastReadPageIndex
+                  : existing?.lastReadPageIndex || 0,
+            };
+          });
+
+          // 3. Save merged chapters (false = scraper sync, protects reading status)
+          await saveChapters(manga.id, merged, false);
+          setChapters(merged);
+
+          // 4. Retain sort order: if the user was up to date or completed, maintain Recent ➔ 1
+          // so newly released chapters appear right at the top
           if (!userManuallyToggledSort.current) {
-            const upToDate = isUserUpToDateWithManga(freshList, manga.lastReadChapterId);
+            const upToDate = isUserUpToDateWithManga(merged, manga.lastReadChapterId);
             setSortAscending(!upToDate);
           }
         }
@@ -459,7 +507,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
     } finally {
       setRefreshing(false);
     }
-  }, [manga.id, manga.sourceId, manga.lastReadChapterId]);
+  }, [manga.id, manga.sourceId, manga.lastReadChapterId, chapters]);
 
   // Smart Resume / Next Chapter target
   const primaryAction = useMemo(() => {
@@ -524,7 +572,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
         c.id === ch.id ? { ...c, isRead: !c.isRead } : c
       );
       setChapters(updated);
-      await saveChapters(manga.id, updated);
+      await saveChapters(manga.id, updated, true);
       if (!userManuallyToggledSort.current) {
         const upToDate = isUserUpToDateWithManga(updated, manga.lastReadChapterId);
         setSortAscending(!upToDate);
@@ -631,7 +679,7 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       selectedChapterIds.has(c.id) ? { ...c, isRead: markAs } : c
     );
     setChapters(updated);
-    await saveChapters(manga.id, updated);
+    await saveChapters(manga.id, updated, true);
     setIsSelectionMode(false);
     setSelectedChapterIds(new Set());
     if (!userManuallyToggledSort.current) {

@@ -662,11 +662,17 @@ export class DynamicMadaraSource implements ISource {
       });
     }
 
+    // Ensure chapters are canonically ordered 1 -> N (ascending by chapterNumber)
+    chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
     return chapters;
   }
 
   async getPageList(chapterId: string): Promise<Page[]> {
-    const res = await fetchWithDnsFallback(chapterId, this.headers);
+    const res = await fetchWithDnsFallback(chapterId, {
+      ...this.headers,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching chapter`);
     const html = await res.text();
 
@@ -1303,6 +1309,7 @@ export class DynamicMangaDexSource implements ISource {
               });
             }
             if (chapters.length > 0) {
+              chapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
               return chapters;
             }
           }

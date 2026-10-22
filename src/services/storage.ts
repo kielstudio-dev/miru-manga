@@ -328,26 +328,90 @@ export async function getAllManga(): Promise<Manga[]> {
   }, fallback);
 }
 
-export async function saveChapters(mangaId: string, chapters: Chapter[]): Promise<void> {
-  memoryStore.chapters.set(mangaId, chapters);
+export async function saveChapters(
+  mangaId: string,
+  chapters: Chapter[],
+  isExplicitUserAction: boolean = false
+): Promise<void> {
+  const existingList = memoryStore.chapters.get(mangaId) || [];
+  const existingById = new Map<string, Chapter>();
+  const existingByNum = new Map<number, Chapter>();
+  for (const c of existingList) {
+    existingById.set(c.id, c);
+    existingByNum.set(c.chapterNumber, c);
+  }
+
+  // Merge incoming scraper chapters with existing user progress unless this is an explicit user action (e.g. toggle read)
+  const mergedList: Chapter[] = chapters.map((ch) => {
+    if (isExplicitUserAction) return ch;
+    const prev = existingById.get(ch.id) || existingByNum.get(ch.chapterNumber);
+    return {
+      ...ch,
+      isRead: Boolean(ch.isRead || prev?.isRead),
+      lastReadPageIndex:
+        ch.lastReadPageIndex && ch.lastReadPageIndex > 0
+          ? ch.lastReadPageIndex
+          : prev?.lastReadPageIndex || 0,
+    };
+  });
+
+  memoryStore.chapters.set(mangaId, mergedList);
+
   await safeDbRun(async (db) => {
-    for (const ch of chapters) {
-      await db.runAsync(
-        `INSERT OR REPLACE INTO chapters (
-          id, mangaId, chapterNumber, title, releaseDate, isRead, lastReadPageIndex, totalPages, sourceId
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [
-          ch.id,
-          ch.mangaId,
-          ch.chapterNumber,
-          ch.title,
-          ch.releaseDate || '',
-          ch.isRead ? 1 : 0,
-          ch.lastReadPageIndex || 0,
-          ch.totalPages || 0,
-          ch.sourceId,
-        ]
-      );
+    for (const ch of mergedList) {
+      if (isExplicitUserAction) {
+        await db.runAsync(
+          `INSERT INTO chapters (
+            id, mangaId, chapterNumber, title, releaseDate, isRead, lastReadPageIndex, totalPages, sourceId
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            mangaId = excluded.mangaId,
+            chapterNumber = excluded.chapterNumber,
+            title = excluded.title,
+            releaseDate = CASE WHEN excluded.releaseDate != '' THEN excluded.releaseDate ELSE chapters.releaseDate END,
+            isRead = excluded.isRead,
+            lastReadPageIndex = excluded.lastReadPageIndex,
+            totalPages = CASE WHEN excluded.totalPages > 0 THEN excluded.totalPages ELSE chapters.totalPages END,
+            sourceId = excluded.sourceId;`,
+          [
+            ch.id,
+            ch.mangaId,
+            ch.chapterNumber,
+            ch.title,
+            ch.releaseDate || '',
+            ch.isRead ? 1 : 0,
+            ch.lastReadPageIndex || 0,
+            ch.totalPages || 0,
+            ch.sourceId,
+          ]
+        );
+      } else {
+        await db.runAsync(
+          `INSERT INTO chapters (
+            id, mangaId, chapterNumber, title, releaseDate, isRead, lastReadPageIndex, totalPages, sourceId
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            mangaId = excluded.mangaId,
+            chapterNumber = excluded.chapterNumber,
+            title = excluded.title,
+            releaseDate = CASE WHEN excluded.releaseDate != '' THEN excluded.releaseDate ELSE chapters.releaseDate END,
+            isRead = CASE WHEN chapters.isRead = 1 OR excluded.isRead = 1 THEN 1 ELSE 0 END,
+            lastReadPageIndex = CASE WHEN chapters.lastReadPageIndex > 0 THEN chapters.lastReadPageIndex ELSE excluded.lastReadPageIndex END,
+            totalPages = CASE WHEN excluded.totalPages > 0 THEN excluded.totalPages ELSE chapters.totalPages END,
+            sourceId = excluded.sourceId;`,
+          [
+            ch.id,
+            ch.mangaId,
+            ch.chapterNumber,
+            ch.title,
+            ch.releaseDate || '',
+            ch.isRead ? 1 : 0,
+            ch.lastReadPageIndex || 0,
+            ch.totalPages || 0,
+            ch.sourceId,
+          ]
+        );
+      }
     }
   }, undefined);
 }

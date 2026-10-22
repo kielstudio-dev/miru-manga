@@ -10,6 +10,7 @@ import { PagedReader } from './PagedReader';
 import { ReaderOverlay } from './ReaderOverlay';
 import { getDownloadedPages } from '../../services/downloads';
 import { colors } from '../../theme/colors';
+import { isChapterInRecentWindow, getFreshPageUrl } from '../../utils/chapterFreshness';
 
 interface ReaderViewProps {
   manga: Manga;
@@ -45,15 +46,17 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     });
   }, []);
 
-  // Fetch page list for current chapter (prioritize local offline downloads)
+  // Fetch page list for current chapter (prioritize local offline downloads, unless in active re-check window)
   const loadPages = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Check local offline downloaded pages first
+      const isRecent = isChapterInRecentWindow(chapter, allChapters);
+
+      // Check local offline downloaded pages first (if not in recent auto-recheck window)
       const localPages = await getDownloadedPages(chapter.id);
-      if (localPages && localPages.length > 0) {
+      if (localPages && localPages.length > 0 && !isRecent) {
         setPages(localPages);
         const startIdx = chapter.isRead ? 0 : (chapter.lastReadPageIndex || 0);
         setCurrentPage(startIdx);
@@ -61,8 +64,17 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       }
 
       const source = sourceRegistry.get(chapter.sourceId) || sourceRegistry.getLocalSource();
-      const pageList = await source.getPageList(chapter.id);
-      setPages(pageList);
+      const rawPages = await source.getPageList(chapter.id);
+
+      // For recent chapters (uploaded/updated in last 2-3 days or top 3 ongoing releases),
+      // apply a 3-hour window cache-buster so expo-image refreshes corrected images automatically
+      // if the scanlation provider replaced scrambled/jumbled pages
+      const processedPages = rawPages.map((p) => ({
+        ...p,
+        url: getFreshPageUrl(p.url, isRecent),
+      }));
+
+      setPages(processedPages);
       const startIdx = chapter.isRead ? 0 : (chapter.lastReadPageIndex || 0);
       setCurrentPage(startIdx);
     } catch (err: any) {
@@ -71,9 +83,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [chapter]);
+  }, [chapter, allChapters]);
 
-  // Force-reload chapter pages directly from source with cache-busting
+  // Force-reload chapter pages directly from source with immediate cache-busting
   const handleReloadChapter = useCallback(async () => {
     try {
       setLoading(true);
@@ -81,20 +93,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       const source = sourceRegistry.get(chapter.sourceId) || sourceRegistry.getLocalSource();
       const freshPages = await source.getPageList(chapter.id);
 
-      // Append cache-buster timestamp query to image URLs so expo-image bypasses disk cache for any re-uploaded fixes
-      const cacheBustedPages = freshPages.map((p) => {
-        const sep = p.url.includes('?') ? '&' : '?';
-        return {
-          ...p,
-          url: `${p.url}${sep}_t=${Date.now()}`,
-        };
-      });
+      const timestamp = Date.now();
+      const cacheBustedPages = freshPages.map((p) => ({
+        ...p,
+        url: getFreshPageUrl(p.url, true, timestamp),
+      }));
 
       setPages(cacheBustedPages);
-      setCurrentPage(0);
       Alert.alert(
         'Chapter Reloaded 🔄',
-        `Successfully reloaded ${freshPages.length} pages fresh from the source with updated ordering.`
+        `Successfully reloaded ${freshPages.length} pages fresh from the source with updated ordering and images.`
       );
     } catch (err: any) {
       console.error('[ReaderView] Error reloading chapter:', err);
