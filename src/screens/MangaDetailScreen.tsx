@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -20,6 +20,7 @@ import {
   deleteDownloadedChapter,
   getDownloadedChapterIdsForManga,
 } from '../services/downloads';
+import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
 
 interface MangaDetailScreenProps {
@@ -97,8 +98,11 @@ const ChapterRowItem = React.memo<ChapterRowProps>(
             {Boolean(ch.releaseDate) && (
               <Text style={styles.chapterMetaText}>{ch.releaseDate}</Text>
             )}
+            {Boolean(ch.releaseDate && ch.totalPages > 0) && (
+              <Text style={styles.chapterMetaText}>•</Text>
+            )}
             {ch.totalPages > 0 && (
-              <Text style={styles.chapterMetaText}>• {ch.totalPages} pages</Text>
+              <Text style={styles.chapterMetaText}>{ch.totalPages} pages</Text>
             )}
           </View>
         </View>
@@ -138,6 +142,49 @@ const ChapterRowItem = React.memo<ChapterRowProps>(
   }
 );
 
+/**
+ * Automatically detects whether the user is up to date on an ongoing or completed manga.
+ * If true, chapters should automatically reverse (newest/latest at top) so when new chapters
+ * go live, they appear right at the top for immediate access.
+ */
+function isUserUpToDateWithManga(
+  chList: Chapter[],
+  lastReadChapterId?: string | null
+): boolean {
+  if (!chList || chList.length <= 1) return false;
+
+  const total = chList.length;
+  const readChapters = chList.filter((c) => c.isRead);
+  const readCount = readChapters.length;
+  if (readCount === 0) return false;
+
+  // 1. Every chapter has been read
+  if (readCount === total) return true;
+
+  const latestChapter = chList[total - 1];
+  const secondLatest = total > 1 ? chList[total - 2] : null;
+  const thirdLatest = total > 2 ? chList[total - 3] : null;
+
+  // 2. The latest chapter is already marked as read
+  if (latestChapter.isRead) return true;
+
+  // 3. User finished up to the previous latest chapter (e.g. Ch 50 read, Ch 51 just released)
+  if (secondLatest && secondLatest.isRead) return true;
+
+  // 4. Batch release: up to 3 new chapters just dropped, and user finished up to the 3rd latest
+  if (thirdLatest && thirdLatest.isRead && total - readCount <= 3) return true;
+
+  // 5. User's recorded lastReadChapterId is one of the top 3 latest chapters and user has read multiple chapters
+  if (lastReadChapterId) {
+    const lastReadIdx = chList.findIndex((c) => c.id === lastReadChapterId);
+    if (lastReadIdx >= 0 && lastReadIdx >= total - 3 && readCount >= Math.min(3, total - 1)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
   manga,
   onBack,
@@ -153,10 +200,12 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [sortAscending, setSortAscending] = useState<boolean>(true);
+  const userManuallyToggledSort = useRef<boolean>(false);
 
   // Multi-select state
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<string>>(new Set());
+  const [showProModal, setShowProModal] = useState<boolean>(false);
 
   // Sync prop updates
   useEffect(() => {
@@ -294,7 +343,18 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
         await downloadChapter(manga, ch);
         setDownloadedChapterIds((prev) => new Set(prev).add(ch.id));
       } catch (err: any) {
-        Alert.alert('Download Failed', err?.message || 'Could not download chapter.');
+        if (err?.message?.includes('FREE_LIMIT_REACHED')) {
+          Alert.alert(
+            'Offline Download Limit',
+            'Free accounts are limited to 5 offline chapters.\n\nUpgrade to Lifetime Pro for unlimited offline downloads!',
+            [
+              { text: 'Later', style: 'cancel' },
+              { text: 'Upgrade to Pro', onPress: () => setShowProModal(true) },
+            ]
+          );
+        } else {
+          Alert.alert('Download Failed', err?.message || 'Could not download chapter.');
+        }
       } finally {
         setDownloadingChapterId(null);
       }
@@ -323,7 +383,18 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       }
       Alert.alert('Downloads Complete', `Downloaded ${toDownload.length} chapters for offline reading! 📥`);
     } catch (err: any) {
-      Alert.alert('Download Error', err?.message || 'Error downloading batch.');
+      if (err?.message?.includes('FREE_LIMIT_REACHED')) {
+        Alert.alert(
+          'Offline Download Limit',
+          'Free accounts are limited to 5 offline chapters.\n\nUpgrade to Lifetime Pro for unlimited offline downloads!',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Upgrade to Pro', onPress: () => setShowProModal(true) },
+          ]
+        );
+      } else {
+        Alert.alert('Download Error', err?.message || 'Error downloading batch.');
+      }
     } finally {
       setDownloadingChapterId(null);
       setDownloadingBatch(false);
@@ -337,13 +408,25 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
         setLoading(true);
         // First check SQLite
         let chList = await getChaptersForManga(manga.id);
-        // If empty or containing legacy external redirect placeholders, re-fetch live readable chapters
-        if (chList.length === 0 || chList.some((c) => c.id.startsWith('ext::'))) {
+        // If empty, containing legacy external redirect placeholders, or containing corrupted title with relative dates, re-fetch live readable chapters
+        const needsFreshFetch =
+          chList.length === 0 ||
+          chList.some(
+            (c) =>
+              c.id.startsWith('ext::') ||
+              c.title.match(/(?:days?|hours?|mins?|weeks?|months?|years?)\s+ago/i) ||
+              c.title.toLowerCase().includes('first chapter')
+          );
+        if (needsFreshFetch) {
           const source = sourceRegistry.get(manga.sourceId) || sourceRegistry.getLocalSource();
           chList = await source.getChapters(manga.id);
           await saveChapters(manga.id, chList);
         }
         setChapters(chList);
+        if (!userManuallyToggledSort.current) {
+          const upToDate = isUserUpToDateWithManga(chList, manga.lastReadChapterId);
+          setSortAscending(!upToDate);
+        }
       } catch (err) {
         console.error('[MangaDetailScreen] Error fetching chapters:', err);
       } finally {
@@ -353,12 +436,56 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
     fetchChapters();
   }, [manga]);
 
-  // Determine chapter to resume
-  const lastReadChapter = useMemo(
-    () => chapters.find((c) => c.id === manga.lastReadChapterId),
-    [chapters, manga.lastReadChapterId]
-  );
-  const resumeTarget = lastReadChapter || (chapters.length > 0 ? chapters[0] : null);
+  // Smart Resume / Next Chapter target
+  const primaryAction = useMemo(() => {
+    if (chapters.length === 0) return null;
+
+    if (manga.lastReadChapterId) {
+      const lastIdx = chapters.findIndex((c) => c.id === manga.lastReadChapterId);
+      if (lastIdx >= 0) {
+        const last = chapters[lastIdx];
+        // If the last chapter was already finished and there is a subsequent chapter (e.g., new chapter just dropped):
+        if (last.isRead && lastIdx < chapters.length - 1) {
+          const next = chapters[lastIdx + 1];
+          return {
+            targetChapter: next,
+            icon: 'play',
+            label: `Read Ch. ${next.chapterNumber}`,
+          };
+        }
+        // If all chapters up to the end are finished:
+        if (last.isRead && lastIdx === chapters.length - 1) {
+          return {
+            targetChapter: chapters[0],
+            icon: 'reload-outline',
+            label: `Completed (Re-read Ch. 1)`,
+          };
+        }
+        // Still reading this chapter:
+        return {
+          targetChapter: last,
+          icon: 'play',
+          label: `Resume Ch. ${last.chapterNumber} (p. ${(last.lastReadPageIndex || 0) + 1})`,
+        };
+      }
+    }
+
+    // No lastReadChapterId: check if some chapters are marked read
+    const firstUnread = chapters.find((c) => !c.isRead);
+    if (firstUnread) {
+      return {
+        targetChapter: firstUnread,
+        icon: 'play',
+        label: `Start Reading Ch. ${firstUnread.chapterNumber}`,
+      };
+    }
+
+    return {
+      targetChapter: chapters[0],
+      icon: 'play',
+      label: `Start Reading Ch. 1`,
+    };
+  }, [chapters, manga.lastReadChapterId]);
 
   // Compute displayed chapters based on sort order (1 ➔ Recent vs Recent ➔ 1)
   const displayedChapters = useMemo(
@@ -373,8 +500,12 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       );
       setChapters(updated);
       await saveChapters(manga.id, updated);
+      if (!userManuallyToggledSort.current) {
+        const upToDate = isUserUpToDateWithManga(updated, manga.lastReadChapterId);
+        setSortAscending(!upToDate);
+      }
     },
-    [chapters, manga.id]
+    [chapters, manga.id, manga.lastReadChapterId]
   );
 
   // Multi-select handlers
@@ -449,7 +580,18 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
       setIsSelectionMode(false);
       setSelectedChapterIds(new Set());
     } catch (err: any) {
-      Alert.alert('Download Error', err?.message || 'Error occurred during batch download.');
+      if (err?.message?.includes('FREE_LIMIT_REACHED')) {
+        Alert.alert(
+          'Offline Download Limit',
+          'Free accounts are limited to 5 offline chapters.\n\nUpgrade to Lifetime Pro for unlimited offline downloads!',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Upgrade to Pro', onPress: () => setShowProModal(true) },
+          ]
+        );
+      } else {
+        Alert.alert('Download Error', err?.message || 'Error occurred during batch download.');
+      }
     } finally {
       setDownloadingChapterId(null);
       setDownloadingBatch(false);
@@ -467,6 +609,10 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
     await saveChapters(manga.id, updated);
     setIsSelectionMode(false);
     setSelectedChapterIds(new Set());
+    if (!userManuallyToggledSort.current) {
+      const upToDate = isUserUpToDateWithManga(updated, manga.lastReadChapterId);
+      setSortAscending(!upToDate);
+    }
   };
 
   const handleBatchDeleteSelected = async () => {
@@ -591,17 +737,15 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
 
       {/* Action Buttons Row */}
       <View style={styles.mainActionsRow}>
-        {resumeTarget && (
+        {primaryAction && (
           <TouchableOpacity
             style={styles.resumeButton}
-            onPress={() => onOpenChapter(resumeTarget, chapters)}
+            onPress={() => onOpenChapter(primaryAction.targetChapter, chapters)}
             activeOpacity={0.85}
           >
-            <Ionicons name="play" size={20} color="#ffffff" />
+            <Ionicons name={primaryAction.icon as any} size={20} color="#ffffff" />
             <Text style={styles.resumeButtonText}>
-              {lastReadChapter
-                ? `Resume Ch. ${lastReadChapter.chapterNumber} (p. ${lastReadChapter.lastReadPageIndex + 1})`
-                : `Start Reading Ch. 1`}
+              {primaryAction.label}
             </Text>
           </TouchableOpacity>
         )}
@@ -653,7 +797,10 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
             {/* Sort Toggle Button */}
             <TouchableOpacity
               style={styles.sortToggleBtn}
-              onPress={() => setSortAscending((prev) => !prev)}
+              onPress={() => {
+                userManuallyToggledSort.current = true;
+                setSortAscending((prev) => !prev);
+              }}
               activeOpacity={0.7}
             >
               <Ionicons name="swap-vertical" size={13} color="#a78bfa" />
@@ -842,6 +989,11 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
             </View>
           </View>
         )}
+
+        <ProUpgradeModal
+          visible={showProModal}
+          onClose={() => setShowProModal(false)}
+        />
       </SafeAreaView>
     </View>
   );

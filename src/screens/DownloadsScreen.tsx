@@ -41,7 +41,7 @@ interface MangaDownloadItem {
   isExpanded?: boolean;
 }
 
-export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
+export const DownloadsScreen = React.memo<DownloadsScreenProps>(({
   onOpenManga,
   onOpenChapter,
   onNavigateToBookmarks,
@@ -61,8 +61,11 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
   const [expandedMangaIds, setExpandedMangaIds] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
 
-  const loadOfflineData = useCallback(async () => {
+  const loadOfflineData = useCallback(async (isBackground = false) => {
     try {
+      if (!isBackground) {
+        setLoading(true);
+      }
       const [mangasWithDownloads, allSaved, stats] = await Promise.all([
         getDownloadedMangaList(),
         getAllManga(),
@@ -100,13 +103,13 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
   // Refresh whenever screen receives focus
   useEffect(() => {
     if (isFocused) {
-      loadOfflineData();
+      loadOfflineData(downloadedItems.length > 0);
     }
   }, [isFocused, loadOfflineData]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadOfflineData();
+    loadOfflineData(false);
   };
 
   const toggleExpand = (mangaId: string) => {
@@ -311,6 +314,7 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
           <TouchableOpacity
             style={[styles.filterPill, activeFilter === 'all' && styles.filterPillActive]}
             onPress={() => setActiveFilter('all')}
+            delayPressIn={0}
           >
             <Text style={[styles.filterPillText, activeFilter === 'all' && styles.filterPillTextActive]}>
               All ({downloadedItems.length + localComics.length})
@@ -320,6 +324,7 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
           <TouchableOpacity
             style={[styles.filterPill, activeFilter === 'downloaded' && styles.filterPillActive]}
             onPress={() => setActiveFilter('downloaded')}
+            delayPressIn={0}
           >
             <Ionicons
               name="cloud-done"
@@ -334,6 +339,7 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
           <TouchableOpacity
             style={[styles.filterPill, activeFilter === 'local' && styles.filterPillActive]}
             onPress={() => setActiveFilter('local')}
+            delayPressIn={0}
           >
             <Ionicons
               name="document-text-outline"
@@ -559,7 +565,7 @@ export const DownloadsScreen: React.FC<DownloadsScreenProps> = ({
       </SafeAreaView>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

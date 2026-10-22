@@ -44,22 +44,56 @@ const pageHeightCache: Record<string, number> = {};
 const WebtoonPageItem: React.FC<{
   item: Page;
   onPress: () => void;
-}> = ({ item, onPress }) => {
+  onHeightMeasured?: (index: number, height: number) => void;
+}> = ({ item, onPress, onHeightMeasured }) => {
   const cached = pageHeightCache[item.url];
+  const [currentUrl, setCurrentUrl] = useState(item.url);
   const [loading, setLoading] = useState(!cached);
+  const [hasError, setHasError] = useState(false);
+  const [fallbackTried, setFallbackTried] = useState(false);
   const [pageHeight, setPageHeight] = useState<number>(cached || SCREEN_WIDTH * 1.4);
 
-  const hostMatch = item.url.match(/https?:\/\/[^\/]+/);
+  useEffect(() => {
+    setCurrentUrl(item.url);
+    setHasError(false);
+    setFallbackTried(false);
+  }, [item.url]);
+
+  const hostMatch = currentUrl.match(/https?:\/\/[^\/]+/);
   const imageHeaders: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     ...(hostMatch ? { Referer: `${hostMatch[0]}/` } : {}),
+  };
+
+  const handleError = () => {
+    // If from a volunteer node and haven't tried central MangaDex upload server yet
+    if (!fallbackTried && (currentUrl.includes('.mangadex.network') || currentUrl.includes(':44300'))) {
+      const match = currentUrl.match(/\/(data(?:-saver)?\/[a-f0-9]+\/[^/?#]+)/i);
+      if (match) {
+        const cdnUrl = `https://uploads.mangadex.org/${match[1]}`;
+        setFallbackTried(true);
+        setCurrentUrl(cdnUrl);
+        setLoading(true);
+        setHasError(false);
+        return;
+      }
+    }
+    setLoading(false);
+    setHasError(true);
+  };
+
+  const handleRetry = () => {
+    setHasError(false);
+    setLoading(true);
+    const sep = currentUrl.includes('?') ? '&' : '?';
+    setCurrentUrl(`${currentUrl}${sep}_t=${Date.now()}`);
   };
 
   return (
     <View style={[styles.pageWrapper, { width: SCREEN_WIDTH, minHeight: pageHeight }]}>
       <Image
         source={{
-          uri: item.url,
+          uri: currentUrl,
           headers: imageHeaders,
         }}
         style={{
@@ -69,23 +103,37 @@ const WebtoonPageItem: React.FC<{
         contentFit="contain"
         contentPosition="top center"
         transition={150}
-        cachePolicy="disk"
+        cachePolicy="memory-disk"
+        priority="high"
         onLoadStart={() => {
           if (!cached) setLoading(true);
         }}
         onLoad={(e) => {
           setLoading(false);
+          setHasError(false);
           if (e.source.width && e.source.height && e.source.height > 0) {
             const exactHeight = (SCREEN_WIDTH * e.source.height) / e.source.width;
             pageHeightCache[item.url] = exactHeight;
+            pageHeightCache[currentUrl] = exactHeight;
             setPageHeight(exactHeight);
+            onHeightMeasured?.(item.index, exactHeight);
           }
         }}
-        onError={() => setLoading(false)}
+        onError={handleError}
       />
-      {loading && (
+      {loading && !hasError && (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="small" color="#7c5cff" />
+        </View>
+      )}
+      {hasError && (
+        <View style={styles.errorBox}>
+          <Ionicons name="alert-circle-outline" size={32} color="#f87171" />
+          <Text style={styles.errorText}>Page {item.index + 1} failed to load</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={handleRetry} activeOpacity={0.8}>
+            <Ionicons name="refresh" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+            <Text style={styles.retryBtnText}>Tap to Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -107,10 +155,10 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
   const flatListRef = useRef<FlatList>(null);
   const initialPageRef = useRef(initialPage);
   const [currentPageIndex, setCurrentPageIndex] = useState(initialPage);
+  const currentPageIndexRef = useRef(initialPage);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [isZoomed, setIsZoomed] = useState(false);
   const lastChapterKeyRef = useRef<string | null>(null);
-
   // Pinch-to-zoom shared values for the view
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -118,6 +166,40 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
   const translateY = useSharedValue(0);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
+
+  // Height cache per page index for fast cumulative offset calculations & real-time scroll tracking
+  const pageHeightsRef = useRef<number[]>([]);
+
+  // Initialize page heights from cache or default aspect ratio
+  useEffect(() => {
+    pageHeightsRef.current = pages.map(
+      (p) => pageHeightCache[p.url] || SCREEN_WIDTH * 1.4
+    );
+  }, [pages]);
+
+  // Keep ref in sync
+  useEffect(() => {
+    currentPageIndexRef.current = currentPageIndex;
+  }, [currentPageIndex]);
+
+  // Proactively prefetch upcoming 3 pages into memory/disk cache for smooth zero-lag scrolling
+  useEffect(() => {
+    const prefetchAhead = 3;
+    for (let i = 1; i <= prefetchAhead; i++) {
+      const nextIdx = currentPageIndex + i;
+      if (nextIdx < pages.length) {
+        const nextUrl = pages[nextIdx]?.url;
+        if (nextUrl && nextUrl.startsWith('http')) {
+          const hostMatch = nextUrl.match(/https?:\/\/[^\/]+/);
+          const headers: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            ...(hostMatch ? { Referer: `${hostMatch[0]}/` } : {}),
+          };
+          Image.prefetch(nextUrl, { headers }).catch(() => {});
+        }
+      }
+    }
+  }, [currentPageIndex, pages]);
 
   // Generate unique chapter key
   const chapterKey = pages.length > 0 ? `${pages[0]?.url}-${pages.length}` : '';
@@ -135,6 +217,7 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
       setIsZoomed(false);
       setScrollProgress(0);
       setCurrentPageIndex(0);
+      currentPageIndexRef.current = 0;
 
       if (flatListRef.current) {
         flatListRef.current.scrollToOffset({ offset: 0, animated: false });
@@ -238,27 +321,61 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
       const p = Math.min(1, Math.max(0, contentOffset.y / totalHeight));
       setScrollProgress(p);
     }
+
+    if (pages.length === 0) return;
+
+    // Track active page in real time while scrolling based on focal reading line (35% from viewport top)
+    const scrollY = contentOffset.y;
+    const focalPoint = scrollY + layoutMeasurement.height * 0.35;
+
+    let accumulated = 0;
+    let foundIndex = 0;
+    for (let i = 0; i < pages.length; i++) {
+      const h = pageHeightsRef.current[i] || (SCREEN_WIDTH * 1.4);
+      accumulated += h;
+      if (accumulated >= focalPoint) {
+        foundIndex = i;
+        break;
+      }
+      if (i === pages.length - 1) {
+        foundIndex = pages.length - 1;
+      }
+    }
+
+    if (foundIndex !== currentPageIndexRef.current) {
+      currentPageIndexRef.current = foundIndex;
+      setCurrentPageIndex(foundIndex);
+      onPageChange(foundIndex);
+    }
   };
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ index?: number | null }> }) => {
       if (viewableItems.length > 0 && typeof viewableItems[0].index === 'number') {
         const idx = viewableItems[0].index;
-        setCurrentPageIndex(idx);
-        onPageChange(idx);
+        if (idx !== currentPageIndexRef.current) {
+          currentPageIndexRef.current = idx;
+          setCurrentPageIndex(idx);
+          onPageChange(idx);
+        }
       }
     }
   ).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 35,
-    minimumViewTime: 200,
+    viewAreaCoveragePercentThreshold: 10,
+    waitForInteraction: false,
   }).current;
 
   const scrollToPage = (targetIndex: number) => {
     if (targetIndex >= 0 && targetIndex < pages.length && flatListRef.current) {
       try {
-        flatListRef.current.scrollToIndex({ index: targetIndex, animated: true });
+        let offset = 0;
+        for (let i = 0; i < targetIndex; i++) {
+          offset += pageHeightsRef.current[i] || (SCREEN_WIDTH * 1.4);
+        }
+        flatListRef.current.scrollToOffset({ offset, animated: true });
+        currentPageIndexRef.current = targetIndex;
         setCurrentPageIndex(targetIndex);
         onPageChange(targetIndex);
       } catch (e) {
@@ -362,9 +479,10 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
             bounces={false}
             overScrollMode="never"
             removeClippedSubviews={false}
-            initialNumToRender={pages.length}
-            maxToRenderPerBatch={pages.length}
-            windowSize={11}
+            initialNumToRender={3}
+            maxToRenderPerBatch={4}
+            windowSize={7}
+            updateCellsBatchingPeriod={50}
             initialScrollIndex={
               initialPageRef.current > 0 && initialPageRef.current < pages.length
                 ? initialPageRef.current
@@ -380,7 +498,13 @@ export const WebtoonReader: React.FC<WebtoonReaderProps> = ({
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
             renderItem={({ item }) => (
-              <WebtoonPageItem item={item} onPress={onToggleOverlay} />
+              <WebtoonPageItem
+                item={item}
+                onPress={onToggleOverlay}
+                onHeightMeasured={(idx, h) => {
+                  pageHeightsRef.current[idx] = h;
+                }}
+              />
             )}
             ListFooterComponent={renderFooter}
           />
@@ -488,6 +612,39 @@ const styles = StyleSheet.create({
     height: 300,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  errorBox: {
+    ...StyleSheet.absoluteFill,
+    height: 240,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(18, 18, 24, 0.88)',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginVertical: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+  },
+  errorText: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7c5cff',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    elevation: 3,
+  },
+  retryBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   // Visible Side Progress Rail
   sideProgressRail: {

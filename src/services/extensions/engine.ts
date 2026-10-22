@@ -2,6 +2,91 @@ import { ISource } from '../sources/types';
 import { ExtensionManifest } from './types';
 import { Manga, Chapter, Page } from '../../types';
 
+/**
+ * Safe HTTP fetcher that automatically catches ISP DNS sinkholes (such as 10.254.254.1 or network blocks)
+ * and falls back to an uncensored global cloud proxy so adult/blocked manga loads without needing private DNS.
+ */
+async function fetchWithDnsFallback(
+  url: string,
+  headers: Record<string, string>,
+  options?: RequestInit,
+  timeoutMs: number = 7000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal, ...options });
+    clearTimeout(timer);
+    if (res.ok) return res;
+    if (res.status === 403 || res.status >= 500) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return res;
+  } catch (err: any) {
+    clearTimeout(timer);
+    const errMsg = String(err?.message || err);
+    const isBlocked =
+      errMsg.includes('10.254.254.1') ||
+      errMsg.includes('ConnectException') ||
+      errMsg.includes('Network request failed') ||
+      errMsg.includes('Failed to fetch') ||
+      errMsg.includes('aborted') ||
+      errMsg.includes('403') ||
+      errMsg.includes('503');
+
+    if (isBlocked) {
+      try {
+        const proxyController = new AbortController();
+        const pTimer = setTimeout(() => proxyController.abort(), 6000);
+        const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+        const pRes = await fetch(proxyUrl, {
+          headers: { 'User-Agent': headers['User-Agent'] || 'Mozilla/5.0' },
+          signal: proxyController.signal,
+        });
+        clearTimeout(pTimer);
+        if (pRes.ok) return pRes;
+      } catch (pErr) {
+        try {
+          const aController = new AbortController();
+          const aTimer = setTimeout(() => aController.abort(), 5000);
+          const altProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          const aRes = await fetch(altProxyUrl, { signal: aController.signal });
+          clearTimeout(aTimer);
+          if (aRes.ok) return aRes;
+        } catch (aErr) {}
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Normalizes remote image URLs:
+ * - Decodes Next.js proxy URLs (e.g. Flame Comics: /_next/image?url=https%3A%2F%2F...&w=1920&q=75) into direct raw CDN URLs
+ * - Resolves relative and protocol-relative paths
+ * - Removes WordPress thumbnail resize dimensions (-150x150) for maximum image clarity
+ */
+export function cleanSourceImageUrl(rawUrl: string, baseUrl?: string): string {
+  if (!rawUrl) return '';
+  let url = rawUrl.trim();
+  if (url.includes('_next/image') && url.includes('url=')) {
+    const nextUrlMatch = url.match(/[?&]url=([^&]+)/);
+    if (nextUrlMatch) {
+      try {
+        url = decodeURIComponent(nextUrlMatch[1]);
+      } catch (e) {}
+    }
+  }
+  if (url.startsWith('//')) {
+    url = `https:${url}`;
+  } else if (url.startsWith('/') && baseUrl) {
+    url = `${baseUrl}${url}`;
+  }
+  url = url.replace(/-\d+x\d+(\.\w+)$/, '$1').trim();
+  return url;
+}
+
 export class DynamicMadaraSource implements ISource {
   id: string;
   name: string;
@@ -12,6 +97,8 @@ export class DynamicMadaraSource implements ISource {
   baseUrl: string;
   headers: Record<string, string>;
   isNsfw: boolean = false;
+  private flameCatalogCache: Manga[] | null = null;
+  private flameFetchPromise: Promise<Manga[]> | null = null;
 
   constructor(manifest: ExtensionManifest) {
     this.id = manifest.id;
@@ -29,168 +116,254 @@ export class DynamicMadaraSource implements ISource {
     };
   }
 
+  getCategories(): { id: string; label: string }[] {
+    if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
+      return [
+        { id: 'all', label: '🔥 All Comics' },
+        { id: 'ranking', label: '⭐ Top Ranking' },
+      ];
+    }
+    if (this.baseUrl.includes('flamecomics')) {
+      return [
+        { id: 'all', label: '🔥 All Series' },
+      ];
+    }
+    if (this.isNsfw) {
+      return [
+        { id: 'views', label: '🔥 Popular 18+' },
+        { id: 'latest', label: '✨ Latest Releases' },
+        { id: 'manhwa', label: '🔞 Adult Manhwa' },
+        { id: 'doujinshi', label: '🎨 Doujinshi' },
+        { id: 'completed', label: '✅ Completed' },
+      ];
+    }
+    return [
+      { id: 'views', label: '🔥 Popular' },
+      { id: 'latest', label: '✨ Latest Chapters' },
+      { id: 'new-manga', label: '🆕 New Manga' },
+      { id: 'rating', label: '⭐ Top Rated' },
+      { id: 'manhwa', label: '🇰🇷 Manhwa' },
+      { id: 'manhua', label: '🇨🇳 Manhua' },
+      { id: 'fantasy', label: '⚔️ Fantasy' },
+      { id: 'action', label: '💥 Action' },
+      { id: 'isekai', label: '🌀 Isekai' },
+    ];
+  }
+
+  /**
+   * Universal HTML parser to extract manga items from any Madara / webtoon HTML page
+   */
+  parseMangaListHtml(html: string): Manga[] {
+    const linkRegex = /<a\s+([^>]*?)href=["'](?:https?:\/\/[^\/"'>]+)?\/(?:manga|series|comic|comics|webtoon|manhwa)\/([^"'\/#?]+)\/?[^"']*["']([^>]*)>([\s\S]*?)<\/a>/gi;
+    const mangaLinks = [...html.matchAll(linkRegex)];
+
+    const BADGES = new Set([
+      'SS', 'HOT', 'NEW', 'RAW', 'COMPLETED', 'UP', '18+', 'TRENDING', 'HOT MANGA', 'POPULAR', 'TOP', 'BEST', 'RECOMMENDED'
+    ]);
+
+    const seen = new Set<string>();
+    const results: Manga[] = [];
+
+    for (const m of mangaLinks) {
+      const attrs = (m[1] || '') + ' ' + (m[3] || '');
+      const slug = m[2];
+      if (!slug || ['comics', 'series', 'manga', 'webtoon', 'genre', 'genres', 'author', 'bookmark', 'bookmarks'].includes(slug) || slug.includes('?') || slug.includes('=') || seen.has(slug)) continue;
+      seen.add(slug);
+
+      const inner = m[4] || '';
+      const pos = m.index || 0;
+      const context = html.slice(Math.max(0, pos - 250), Math.min(html.length, pos + 1000));
+
+      let coverUrl = '';
+      const imgMatch =
+        inner.match(/(?:data-src|data-lazy-src|data-cfsrc|src)=["']([^"']+)["']/i) ||
+        context.match(/(?:data-src|data-lazy-src|data-cfsrc)=["']([^"']+)["']/i) ||
+        context.match(/\bsrc=["']([^"']+)["']/i);
+
+      if (imgMatch && imgMatch[1] && !imgMatch[1].includes('dflazy') && !imgMatch[1].includes('blank.gif')) {
+        coverUrl = cleanSourceImageUrl(imgMatch[1], this.baseUrl);
+      }
+
+      // Title extraction: strictly filter out badge overlays like "SS", "HOT", "NEW"
+      let title = '';
+      const cleanInner = inner.replace(/<span\b[^>]*class=["'][^"']*badge[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, '');
+
+      // 1. Direct title attribute on <a> tag (e.g. <a title="Martial Peak">)
+      const aTitleMatch = attrs.match(/\btitle=["']([^"']+)["']/i);
+      if (aTitleMatch && !BADGES.has(aTitleMatch[1].toUpperCase().trim())) {
+        title = aTitleMatch[1].replace(/&#8217;/g, "'").replace(/&#8216;/g, "'").trim();
+      }
+
+      // 2. Heading inside cleanInner or post-title
+      if (!title || BADGES.has(title.toUpperCase().trim())) {
+        const headingMatch = cleanInner.match(/<(?:h[1-6]|span|div)\s+[^>]*class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([^<]+)<\//i);
+        if (headingMatch && !BADGES.has(headingMatch[1].toUpperCase().trim())) {
+          title = headingMatch[1].replace(/&#8217;/g, "'").replace(/&#8216;/g, "'").trim();
+        }
+      }
+
+      // 3. Clean image alt tag
+      if (!title || BADGES.has(title.toUpperCase().trim())) {
+        const altMatch = cleanInner.match(/alt=["']([^"']+)["']/i) || context.match(/alt=["']([^"']+)["']/i);
+        if (altMatch && !BADGES.has(altMatch[1].toUpperCase().trim())) {
+          const rawAlt = altMatch[1].replace(/^(?:Read\s+)?(?:Manga|Manhua|Manhwa)\s+/i, '').replace(/&#8217;/g, "'").trim();
+          if (rawAlt.length > 2 && !BADGES.has(rawAlt.toUpperCase())) {
+            title = rawAlt;
+          }
+        }
+      }
+
+      // 4. Context title
+      if (!title || BADGES.has(title.toUpperCase().trim())) {
+        const ctxTitle = context.match(/<(?:h[1-6]|a)[^>]*title=["']([^"']+)["']/i);
+        if (ctxTitle && !BADGES.has(ctxTitle[1].toUpperCase().trim())) {
+          title = ctxTitle[1].replace(/&#8217;/g, "'").trim();
+        }
+      }
+
+      // 5. Fallback to clean slug
+      if (!title || BADGES.has(title.toUpperCase().trim())) {
+        title = slug.replace(/-\w{8}$/, '').replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+
+      results.push({
+        id: `${this.id}::${slug}`,
+        title: title,
+        coverUrl: coverUrl || 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=600',
+        author: this.name,
+        description: '',
+        status: 'ongoing',
+        sourceId: this.id,
+        sourceName: this.name,
+        addedAt: Date.now(),
+        isNsfw: this.isNsfw,
+      });
+    }
+
+    return results;
+  }
+
   async getMangaList(page: number = 1, category: string = 'views'): Promise<Manga[]> {
     try {
+      // Flame Comics: single-page catalog of 150+ titles.
+      // We fetch once, cache the complete catalog, and paginate client-side in lightweight batches of 12!
+      if (this.baseUrl.includes('flamecomics')) {
+        const PAGE_SIZE = 12; // 12 items per batch (6 rows of 2 columns) for instant rendering
+        if (!this.flameCatalogCache) {
+          if (!this.flameFetchPromise) {
+            this.flameFetchPromise = (async () => {
+              const res = await fetchWithDnsFallback(`${this.baseUrl}/browse`, this.headers);
+              if (!res.ok) throw new Error(`HTTP ${res.status} from ${this.baseUrl}`);
+              const html = await res.text();
+              const items = this.parseMangaListHtml(html);
+              this.flameCatalogCache = items;
+              return items;
+            })();
+          }
+          await this.flameFetchPromise;
+          this.flameFetchPromise = null;
+        }
+
+        const all = this.flameCatalogCache || [];
+        const start = (page - 1) * PAGE_SIZE;
+        if (start >= all.length) return [];
+        return all.slice(start, start + PAGE_SIZE);
+      }
+
       let path = '';
       const catLower = (category || 'views').toLowerCase();
 
-      if (catLower === 'views' || catLower === 'popular' || catLower === 'top') {
+      if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
+        path = catLower === 'ranking' ? '/series-ranking' : (page === 1 ? '/comics' : `/comics?page=${page}`);
+      } else if (catLower === 'views' || catLower === 'popular' || catLower === 'top') {
         path = page === 1 ? '/manga/?m_orderby=views' : `/manga/page/${page}/?m_orderby=views`;
-      } else if (catLower === 'new-manga' || catLower === 'latest' || catLower === 'new') {
+      } else if (catLower === 'latest' || catLower === 'update') {
+        path = page === 1 ? '/manga/?m_orderby=latest' : `/manga/page/${page}/?m_orderby=latest`;
+      } else if (catLower === 'new-manga' || catLower === 'new') {
         path = page === 1 ? '/manga/?m_orderby=new-manga' : `/manga/page/${page}/?m_orderby=new-manga`;
+      } else if (catLower === 'rating') {
+        path = page === 1 ? '/manga/?m_orderby=rating' : `/manga/page/${page}/?m_orderby=rating`;
+      } else if (catLower === 'alphabet') {
+        path = page === 1 ? '/manga/?m_orderby=alphabet' : `/manga/page/${page}/?m_orderby=alphabet`;
       } else {
-        // Specific genre or taxonomy: e.g. manhwa, manhua, manga, fantasy, isekai, school-life
         path = page === 1 ? `/genres/${catLower}/` : `/genres/${catLower}/page/${page}/`;
       }
 
       let url = `${this.baseUrl}${path}`;
-      let res = await fetch(url, { headers: this.headers });
+      let res = await fetchWithDnsFallback(url, this.headers);
 
-      // If /genres/ returned 404, fallback to /manga-genre/ (used by alternative Madara themes)
       if (res.status === 404 && path.includes('/genres/')) {
         const altPath = page === 1 ? `/manga-genre/${catLower}/` : `/manga-genre/${catLower}/page/${page}/`;
         url = `${this.baseUrl}${altPath}`;
-        res = await fetch(url, { headers: this.headers });
+        res = await fetchWithDnsFallback(url, this.headers);
+      }
+
+      if (res.status === 404 && path.includes('/manga/')) {
+        const altSeriesPath = path.replace('/manga/', '/series/');
+        url = `${this.baseUrl}${altSeriesPath}`;
+        res = await fetchWithDnsFallback(url, this.headers);
       }
 
       if (!res.ok) throw new Error(`HTTP ${res.status} from ${this.baseUrl}`);
       const html = await res.text();
-
-      const mangaLinks = [
-        ...html.matchAll(
-          new RegExp(`<a\\s+[^>]*href="https?:\/\/[^\/]+\/manga\/([^"\/]+)\/?(?:"|\\?)[^>]*>([\\s\\S]*?)<\/a>`, 'g')
-        ),
-      ];
-
-      const seen = new Set<string>();
-      const results: Manga[] = [];
-
-      for (const m of mangaLinks) {
-        const slug = m[1];
-        if (!slug || slug === 'manga' || slug.includes('?') || slug.includes('=') || seen.has(slug)) continue;
-        seen.add(slug);
-
-        const pos = m.index || 0;
-        const context = html.slice(Math.max(0, pos - 250), Math.min(html.length, pos + 1000));
-
-        let coverUrl = '';
-        const dataSrc = context.match(/(?:data-src|data-lazy-src|data-cfsrc)="([^"]+)"/);
-        const src = context.match(/src="([^"]+)"/);
-        if (dataSrc && dataSrc[1] && !dataSrc[1].includes('dflazy')) {
-          coverUrl = dataSrc[1];
-        } else if (src && src[1] && !src[1].includes('dflazy')) {
-          coverUrl = src[1];
-        }
-
-        coverUrl = coverUrl.replace(/-\d+x\d+(\.\w+)$/, '$1').trim();
-
-        const titleMatch =
-          context.match(/<(?:h3|h4|a)[^>]*title="([^"]+)"/) ||
-          context.match(/title="([^"]+)"/) ||
-          context.match(/alt="([^"]+)"/);
-
-        const title = titleMatch ? titleMatch[1].replace(/&#8217;/g, "'").trim() : slug;
-
-        results.push({
-          id: `${this.id}::${slug}`,
-          title: title,
-          coverUrl: coverUrl || 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=600',
-          author: this.name,
-          description: '',
-          status: 'ongoing',
-          sourceId: this.id,
-          sourceName: this.name,
-          addedAt: Date.now(),
-          isNsfw: this.isNsfw,
-        });
-      }
-
-      return results;
+      return this.parseMangaListHtml(html);
     } catch (err: any) {
-      const isDnsSinkhole =
-        String(err?.message || err).includes('10.254.254.1') ||
-        String(err?.message || err).includes('ConnectException');
-      if (isDnsSinkhole) {
-        console.warn(
-          `[DynamicMadaraSource: ${this.name}] ISP DNS Sinkhole detected (10.254.254.1). Use MangaDex 18+ or enable Android Private DNS (one.one.one.one).`
-        );
-      } else {
-        console.warn(`[DynamicMadaraSource: ${this.name}] getMangaList failed:`, err?.message || err);
-      }
+      console.warn(`[DynamicMadaraSource: ${this.name}] getMangaList failed:`, err?.message || err);
       return [];
     }
   }
 
   async searchManga(query: string): Promise<Manga[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
     try {
-      const url = `${this.baseUrl}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
-      const res = await fetch(url, { headers: this.headers });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = await res.text();
-
-      const mangaLinks = [
-        ...html.matchAll(
-          new RegExp(`<a\\s+[^>]*href="https?:\/\/[^\/]+\/manga\/([^"\/]+)\/?"[^>]*>([\\s\\S]*?)<\/a>`, 'g')
-        ),
-      ];
-
-      const seen = new Set<string>();
-      const results: Manga[] = [];
-
-      for (const m of mangaLinks) {
-        const slug = m[1];
-        if (!slug || slug === 'manga' || slug.includes('?') || slug.includes('=') || seen.has(slug)) continue;
-        seen.add(slug);
-
-        const pos = m.index || 0;
-        const context = html.slice(Math.max(0, pos - 250), Math.min(html.length, pos + 1000));
-
-        let coverUrl = '';
-        const dataSrc = context.match(/(?:data-src|data-lazy-src|data-cfsrc)="([^"]+)"/);
-        const src = context.match(/src="([^"]+)"/);
-        if (dataSrc && dataSrc[1] && !dataSrc[1].includes('dflazy')) {
-          coverUrl = dataSrc[1];
-        } else if (src && src[1] && !src[1].includes('dflazy')) {
-          coverUrl = src[1];
+      // 1. Flame Comics in-memory instant search across the whole catalog in 1ms!
+      if (this.baseUrl.includes('flamecomics')) {
+        if (!this.flameCatalogCache) {
+          await this.getMangaList(1, 'all');
         }
-
-        coverUrl = coverUrl.replace(/-\d+x\d+(\.\w+)$/, '$1').trim();
-
-        const titleMatch =
-          context.match(/<(?:h3|h4|a)[^>]*title="([^"]+)"/) ||
-          context.match(/title="([^"]+)"/) ||
-          context.match(/alt="([^"]+)"/);
-
-        const title = titleMatch ? titleMatch[1].replace(/&#8217;/g, "'").trim() : slug;
-        const altMatch = context.match(/<div class="summary-content">([\s\S]*?)<\/div>/i);
-        const altTitle = altMatch ? altMatch[1].replace(/<[^>]+>/g, '').replace(/&#8217;/g, "'").trim() : '';
-
-        results.push({
-          id: `${this.id}::${slug}`,
-          title: title,
-          altTitle: altTitle,
-          coverUrl: coverUrl || 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=600',
-          author: this.name,
-          description: '',
-          status: 'ongoing',
-          sourceId: this.id,
-          sourceName: this.name,
-          addedAt: Date.now(),
-          isNsfw: this.isNsfw,
-        });
+        const all = this.flameCatalogCache || [];
+        return all.filter(
+          (m) =>
+            m.title.toLowerCase().includes(q) ||
+            m.id.toLowerCase().includes(q)
+        );
       }
 
-      return results;
+      // 2. Asura Scans search
+      if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
+        const url = `${this.baseUrl}/comics?name=${encodeURIComponent(query)}`;
+        const res = await fetchWithDnsFallback(url, this.headers);
+        if (res.ok) {
+          const html = await res.text();
+          return this.parseMangaListHtml(html);
+        }
+      }
+
+      // 3. WordPress Madara themes search
+      const url = `${this.baseUrl}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
+      const res = await fetchWithDnsFallback(url, this.headers);
+      if (res.ok) {
+        const html = await res.text();
+        return this.parseMangaListHtml(html);
+      }
     } catch (err: any) {
       console.warn(`[DynamicMadaraSource: ${this.name}] searchManga failed:`, err?.message || err);
-      return [];
     }
+
+    return [];
   }
 
   async getMangaDetails(mangaId: string): Promise<Manga> {
     const slug = mangaId.replace(`${this.id}::`, '');
-    const url = `${this.baseUrl}/manga/${slug}/`;
-    const res = await fetch(url, { headers: this.headers });
+    let url = slug.includes('/') ? `${this.baseUrl}/${slug}/` : `${this.baseUrl}/manga/${slug}/`;
+    if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
+      url = `${this.baseUrl}/comics/${slug}`;
+    } else if (this.baseUrl.includes('flamecomics')) {
+      url = `${this.baseUrl}/series/${slug}`;
+    }
+    const res = await fetchWithDnsFallback(url, this.headers);
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching manga details`);
     const html = await res.text();
 
@@ -200,21 +373,36 @@ export class DynamicMadaraSource implements ISource {
 
     const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/&#8217;/g, "'").trim() : slug;
 
-    // Extract real cover image, strictly avoiding lazy-load placeholders (dflazy.jpg, blank.gif)
-    const summaryImgDiv = html.match(/<div class="summary_image"[^>]*>([\s\S]*?)<\/div>/i);
-    const searchArea = summaryImgDiv ? summaryImgDiv[1] : html;
-
-    const dataSrc = searchArea.match(/(?:data-src|data-lazy-src|data-cfsrc)="([^"]+)"/i);
-    const src = searchArea.match(/\bsrc="([^"]+)"/i);
-    const ogImg = html.match(/<meta property=["']og:image["'] content=["']([^"']+)["']/i);
-
+    // Extract real cover image: prioritize og:image for crystal-clear full resolution
+    const ogImg = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i);
     let coverUrl = '';
-    if (dataSrc && dataSrc[1] && !dataSrc[1].includes('dflazy') && !dataSrc[1].includes('blank.gif')) {
-      coverUrl = dataSrc[1];
-    } else if (src && src[1] && !src[1].includes('dflazy') && !src[1].includes('blank.gif')) {
-      coverUrl = src[1];
-    } else if (ogImg && ogImg[1] && !ogImg[1].includes('dflazy') && !ogImg[1].includes('blank.gif')) {
+    if (ogImg && ogImg[1] && !ogImg[1].includes('dflazy') && !ogImg[1].includes('blank.gif') && !ogImg[1].endsWith('.js')) {
       coverUrl = ogImg[1];
+    }
+
+    if (!coverUrl) {
+      const summaryImgDiv = html.match(/<div class="summary_image"[^>]*>([\s\S]*?)<\/div>/i);
+      const searchArea = summaryImgDiv ? summaryImgDiv[1] : html;
+      const imgTags = [...searchArea.matchAll(/<img\s+[^>]*>/gi)];
+      for (const t of imgTags) {
+        const m = t[0].match(/(?:data-src|data-lazy-src|data-cfsrc|src)=["']([^"']+)["']/i);
+        if (m && m[1]) {
+          const u = m[1];
+          if (!u.includes('dflazy') && !u.includes('blank.gif') && !u.includes('avatar') && !u.endsWith('.js')) {
+            coverUrl = u;
+            break;
+          }
+        }
+      }
+    }
+
+    if (coverUrl.includes('_next/image') && coverUrl.includes('url=')) {
+      const uMatch = coverUrl.match(/url=([^&]+)/);
+      if (uMatch) coverUrl = decodeURIComponent(uMatch[1]);
+    }
+
+    if (coverUrl.startsWith('/')) {
+      coverUrl = `${this.baseUrl}${coverUrl}`;
     }
     coverUrl = coverUrl.replace(/-\d+x\d+(\.\w+)$/, '$1').trim();
 
@@ -294,42 +482,89 @@ export class DynamicMadaraSource implements ISource {
 
   async getChapters(mangaId: string): Promise<Chapter[]> {
     const slug = mangaId.replace(`${this.id}::`, '');
-    const mangaUrl = `${this.baseUrl}/manga/${slug}/`;
+    let mangaUrl = slug.includes('/') ? `${this.baseUrl}/${slug}/` : `${this.baseUrl}/manga/${slug}/`;
+    if (this.baseUrl.includes('asurascans') || this.baseUrl.includes('asura')) {
+      mangaUrl = `${this.baseUrl}/comics/${slug}`;
+    } else if (this.baseUrl.includes('flamecomics')) {
+      mangaUrl = `${this.baseUrl}/series/${slug}`;
+    }
+
+    interface RawChapterItem {
+      url: string;
+      rawInner: string;
+      rawDate?: string;
+    }
+
+    let rawChapters: RawChapterItem[] = [];
 
     // In Madara WordPress themes, the main HTML only renders a truncated preview of recent chapters,
     // while the POST /ajax/chapters/ endpoint returns the full complete list from Chapter 1 to latest!
-    let chMatches: RegExpMatchArray[] = [];
     try {
-      const ajaxRes = await fetch(`${mangaUrl}ajax/chapters/`, {
-        method: 'POST',
-        headers: {
-          ...this.headers,
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      });
+      const ajaxRes = await fetchWithDnsFallback(`${mangaUrl.replace(/\/+$/, '')}/ajax/chapters/`, {
+        ...this.headers,
+        'X-Requested-With': 'XMLHttpRequest',
+      }, { method: 'POST' });
       if (ajaxRes.ok) {
         const ajaxHtml = await ajaxRes.text();
-        chMatches = [
+        const ajaxMatches = [
           ...ajaxHtml.matchAll(
-            /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+            /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>(?:[\s\S]*?<span\s+class="chapter-release-date"[^>]*>([\s\S]*?)<\/span>)?/gi
           ),
         ];
+        if (ajaxMatches.length > 0) {
+          rawChapters = ajaxMatches.map((m) => ({
+            url: m[1].trim(),
+            rawInner: m[2],
+            rawDate: m[3] ? m[3].replace(/<[^>]+>/g, '').trim() : undefined,
+          }));
+        }
       }
     } catch (e) {
       // Fall back to main page if AJAX fails
     }
 
     // Fallback to scraping main manga page if AJAX returned 0
-    if (chMatches.length === 0) {
+    if (rawChapters.length === 0) {
       try {
-        const res = await fetch(mangaUrl, { headers: this.headers });
+        const res = await fetchWithDnsFallback(mangaUrl, this.headers);
         if (res.ok) {
           const html = await res.text();
-          chMatches = [
+          // 1. Try wp-manga-chapter on main page
+          const wpMatches = [
             ...html.matchAll(
-              /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+              /<li\s+[^>]*class="[^"]*wp-manga-chapter[^"]*"[\s\S]*?<a\s+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>(?:[\s\S]*?<span\s+class="chapter-release-date"[^>]*>([\s\S]*?)<\/span>)?/gi
             ),
           ];
+          if (wpMatches.length > 0) {
+            rawChapters = wpMatches.map((m) => ({
+              url: m[1].trim(),
+              rawInner: m[2],
+              rawDate: m[3] ? m[3].replace(/<[^>]+>/g, '').trim() : undefined,
+            }));
+          } else {
+            // 2. Modern chapter links for Asura Scans, Flame Comics, and custom themes
+            const generalMatches = [
+              ...html.matchAll(
+                /<a\s+[^>]*href=["']([^"']*(?:chapter|\/comics\/[^\/]+\/chapter|\/series\/\d+\/[a-f0-9]+)[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi
+              ),
+            ];
+            for (const m of generalMatches) {
+              const href = m[1].trim();
+              const inner = m[2];
+              // Skip top/bottom navigation buttons ("First Chapter", "Latest Chapter")
+              if (
+                inner.includes('data-continue-label') ||
+                inner.includes('First Chapter') ||
+                inner.includes('Latest Chapter')
+              ) {
+                continue;
+              }
+              rawChapters.push({
+                url: href,
+                rawInner: inner,
+              });
+            }
+          }
         }
       } catch (err) {
         console.error(`[DynamicMadaraSource: ${this.name}] getChapters fetch error:`, err);
@@ -337,20 +572,70 @@ export class DynamicMadaraSource implements ISource {
     }
 
     const chapters: Chapter[] = [];
-    // Chapters in Madara are listed newest first, so reverse for 1 -> N ascending order
-    const ordered = [...chMatches].reverse();
+    const ordered = [...rawChapters].reverse();
     const seenUrls = new Set<string>();
 
     for (let i = 0; i < ordered.length; i++) {
-      const m = ordered[i];
-      const chUrl = m[1].trim();
+      const item = ordered[i];
+      let chUrl = item.url;
+      if (!chUrl.startsWith('http')) {
+        chUrl = `${this.baseUrl}${chUrl.startsWith('/') ? '' : '/'}${chUrl}`;
+      }
       if (!chUrl || seenUrls.has(chUrl)) continue;
       seenUrls.add(chUrl);
 
-      const chTitle = m[2].replace(/<[^>]+>/g, '').trim();
+      let chTitle = '';
+      let releaseDate = item.rawDate || '';
 
-      // Extract accurate chapter number:
-      // Prefer prefix match ("Chapter 12", "Ch. 5", "#24") to avoid matching season/volume digits
+      // Pattern 1: Asura Scans structure
+      // <span class="font-medium text-white...">Chapter <!-- -->20</span>
+      // <span class="text-sm text-white/40">4 days ago</span>
+      const asuraDateMatch = item.rawInner.match(/<span\s+[^>]*class=["'][^"']*text-white\/40[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+      const asuraTitleMatch = item.rawInner.match(/<span\s+[^>]*class=["'][^"']*(?:font-medium|text-white)[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
+      if (asuraTitleMatch) {
+        chTitle = asuraTitleMatch[1].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '').trim();
+        if (asuraDateMatch && !releaseDate) {
+          releaseDate = asuraDateMatch[1].replace(/<[^>]+>/g, '').trim();
+        }
+      }
+
+      // Pattern 2: Flame Comics Mantine structure
+      if (!chTitle) {
+        const flameTitleMatch = item.rawInner.match(/<p\s+[^>]*class=["'][^"']*mantine-Text-root[^"']*["'][^>]*data-line-clamp=["']true["'][^>]*>([\s\S]*?)<\/p>/i);
+        const flameDateMatch =
+          item.rawInner.match(/<p\s+[^>]*class=["'][^"']*mantine-Text-root[^"']*["'][^>]*title=["']([^"']+)["']/i) ||
+          item.rawInner.match(/<p\s+[^>]*class=["'][^"']*mantine-Text-root[^"']*["'][^>]*data-size=["']xs["'][^>]*>([\s\S]*?)<\/p>/i);
+        if (flameTitleMatch) {
+          chTitle = flameTitleMatch[1].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '').trim();
+          if (flameDateMatch && !releaseDate) {
+            releaseDate = (flameDateMatch[1] || '').replace(/<[^>]+>/g, '').trim();
+          }
+        }
+      }
+
+      // Pattern 3: Standard & General fallbacks
+      // Crucial: insert whitespace between HTML tags before stripping, so "Chapter 1" and "4 days ago" never merge!
+      if (!chTitle) {
+        const spaced = item.rawInner
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/<\/p>|<\/div>|<\/span>|<\/li>|<br\s*\/?>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        // Check if there is a relative or absolute date pattern at the end of the text
+        const dateMatch = spaced.match(/(.*?)(?:\s+)?(\d+\s+(?:days?|hours?|mins?|weeks?|months?|years?)\s+ago|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})$/i);
+        if (dateMatch) {
+          chTitle = dateMatch[1].trim();
+          if (!releaseDate) releaseDate = dateMatch[2].trim();
+        } else {
+          chTitle = spaced;
+        }
+      }
+
+      chTitle = chTitle.replace(/\s+/g, ' ').trim();
+
+      // Extract accurate chapter number
       const prefixMatch = chTitle.match(/(?:chapter|ch|ep|episode|#)\.?\s*(\d+(?:\.\d+)?)/i);
       let chNum: number;
       if (prefixMatch) {
@@ -369,7 +654,7 @@ export class DynamicMadaraSource implements ISource {
         mangaId: mangaId,
         chapterNumber: chNum,
         title: chTitle || `Chapter ${chNum}`,
-        releaseDate: '',
+        releaseDate: releaseDate,
         isRead: false,
         lastReadPageIndex: 0,
         totalPages: 0,
@@ -381,7 +666,7 @@ export class DynamicMadaraSource implements ISource {
   }
 
   async getPageList(chapterId: string): Promise<Page[]> {
-    const res = await fetch(chapterId, { headers: this.headers });
+    const res = await fetchWithDnsFallback(chapterId, this.headers);
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching chapter`);
     const html = await res.text();
 
@@ -404,7 +689,7 @@ export class DynamicMadaraSource implements ISource {
       if (!clean) return;
       if (clean.startsWith('data:image')) return;
       if (clean.includes('blank.gif') || clean.includes('dflazy') || clean.includes('placeholder')) return;
-      if (clean.includes('avatar') || clean.includes('logo') || clean.includes('favicon') || clean.includes('/ads/')) return;
+      if (clean.includes('avatar') || clean.includes('logo') || clean.includes('favicon') || clean.includes('/ads/') || clean.includes('/covers/') || clean.includes('thumbnail')) return;
       if (!seen.has(clean)) {
         seen.add(clean);
         results.push(clean);
@@ -460,6 +745,22 @@ export class DynamicMadaraSource implements ISource {
             }
           }
         } catch (e) {}
+      }
+    }
+
+    // Strategy D: General chapter images for modern webtoon sites like Asura and Flame Comics
+    if (results.length === 0) {
+      const allImgs = [...html.matchAll(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi)];
+      for (const m of allImgs) {
+        let u = m[1];
+        if (u && (u.includes('chapter') || u.includes('asura-images') || u.includes('/upload/') || u.includes('/manga/') || u.includes('flamecomics.xyz/uploads'))) {
+          if (u.includes('read_on_flame') || u.includes('thumbnail.png') || u.includes('cover.png')) continue;
+          if (u.includes('_next/image') && u.includes('url=')) {
+            const uMatch = u.match(/url=([^&]+)/);
+            if (uMatch) u = decodeURIComponent(uMatch[1]);
+          }
+          addUrl(u.startsWith('http') ? u : `${this.baseUrl}${u}`);
+        }
       }
     }
 
@@ -536,6 +837,63 @@ export function parseMangaDexTitle(item: any): { title: string; altTitle: string
  * Access over 70,000+ manga, manhwa & manhua with zero cloudflare blockades,
  * multi-language chapters, and high-speed image CDN servers.
  */
+const MANGADEX_ID_FILTERS: Record<string, string> = {
+  // Demographics
+  'mangadex-shonen': '&publicationDemographic[]=shounen',
+  'mangadex-seinen': '&publicationDemographic[]=seinen',
+  'mangadex-shojo': '&publicationDemographic[]=shoujo',
+  'mangadex-josei': '&publicationDemographic[]=josei',
+  // Origins
+  'mangadex-manhwa': '&originalLanguage[]=ko',
+  'mangadex-manhua': '&originalLanguage[]=zh',
+  'mangadex-manga': '&originalLanguage[]=ja',
+  // Safe Genres & Tags
+  'mangadex-action': '&includedTags[]=391b0423-d847-456f-aff0-8b0cfc03066b',
+  'mangadex-adventure': '&includedTags[]=87cc87cd-a395-47af-b27a-93258283bbc6',
+  'mangadex-isekai': '&includedTags[]=ace04997-f6bd-436e-b261-779182193d3d',
+  'mangadex-fantasy': '&includedTags[]=cdc58593-87dd-415e-bbc0-2ec27bf404cc',
+  'mangadex-romance': '&includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d',
+  'mangadex-comedy': '&includedTags[]=4d32cc48-9f00-4cca-9b5a-a839f0764984',
+  'mangadex-scifi': '&includedTags[]=256c8bd9-4904-4360-bf4f-508a76d67183',
+  'mangadex-horror': '&includedTags[]=cdad7e68-1419-41dd-bdce-27753074a640',
+  'mangadex-mystery': '&includedTags[]=ee968100-4191-4968-93d3-f82d72be7e46',
+  'mangadex-psychological': '&includedTags[]=3b60b75c-a2d7-4860-ab56-05f391bb889c',
+  'mangadex-slice-of-life': '&includedTags[]=e5301a23-ebd9-49dd-a0cb-2add944c7fe9',
+  'mangadex-sports': '&includedTags[]=69964a64-2f90-4d33-beeb-f3ed2875eb4c',
+  'mangadex-supernatural': '&includedTags[]=eabc5b4c-6aff-42f3-b657-3e90cbd00b75',
+  'mangadex-thriller': '&includedTags[]=07251805-a27e-4d59-b488-f0bfbec15168',
+  'mangadex-martial-arts': '&includedTags[]=799c202e-7daa-44eb-9cf7-8a3c0441531e',
+  'mangadex-dungeon-rpg': '&includedTags[]=9438db5a-7e2a-4ac0-b39e-e0d95a34b8a8',
+  'mangadex-school-life': '&includedTags[]=caaa44eb-cd40-4177-b930-79d3ef2afe87',
+  'mangadex-historical': '&includedTags[]=33771934-028e-4cb3-8744-691e866a923e',
+  'mangadex-mecha': '&includedTags[]=50880a9d-5440-4732-9afb-8f457127e836',
+  'mangadex-survival': '&includedTags[]=5fff9cde-849c-4d78-aab0-0d52b2ee1d25',
+  'mangadex-superhero': '&includedTags[]=7064a261-a137-4d3a-8848-2d385de3a99c',
+  'mangadex-time-travel': '&includedTags[]=292e862b-2d17-4062-90a2-0356caa4ae27',
+  'mangadex-villainess': '&includedTags[]=d14322ac-4d6f-4e9b-afd9-629d5f4d8a41',
+  'mangadex-monsters': '&includedTags[]=36fd93ea-e8b8-445e-b836-358f02b3d33d',
+  'mangadex-cooking': '&includedTags[]=ea2bc92d-1c26-4930-9b7c-d5c0dc1b6869',
+  'mangadex-music': '&includedTags[]=f42fbf9e-188a-447b-9fdc-f19dc1e4d685',
+  'mangadex-medical': '&includedTags[]=c8cbe35b-1b2b-4a3f-9c37-db84c4514856',
+  'mangadex-tragedy': '&includedTags[]=f8f62932-27da-4fe4-8ee1-6779a8c5edba',
+  'mangadex-crime': '&includedTags[]=5ca48985-9a9d-4bd8-be29-80dc0303db72',
+  'mangadex-demons': '&includedTags[]=39730448-9a5f-48a2-85b0-a70db87b1233',
+  'mangadex-military': '&includedTags[]=ac72833b-c4e9-4878-b9db-6c8a4a99444a',
+  'mangadex-wuxia': '&includedTags[]=acc803a4-c95a-4c22-86fc-eb6b582d82a2',
+  // NSFW / 18+ Genres & Tags
+  'mangadex-doujinshi-18': '&includedTags[]=b13b2a48-c720-44a9-9c77-39c9979373fb',
+  'mangadex-romance-18': '&includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d',
+  'mangadex-yaoi-18': '&includedTags[]=5920b825-4181-4a17-beeb-9918b0ff7a30',
+  'mangadex-yuri-18': '&includedTags[]=a3c67850-4684-404e-9b7f-c69850ee5da6',
+  'mangadex-harem-18': '&includedTags[]=aafb99c1-7f60-43fa-b75f-fc9502ce29c7',
+  'mangadex-manhwa-18': '&originalLanguage[]=ko',
+  'mangadex-gyaru-18': '&includedTags[]=fad12b5e-68ba-460e-b933-9ae8318f5b65',
+  'mangadex-monster-girls-18': '&includedTags[]=dd1f77c5-dea9-4e2b-97ae-224af09caf99',
+  'mangadex-genderswap-18': '&includedTags[]=2bd2e8d0-f146-434a-9b51-fc9ff2c5fe6a',
+  'mangadex-bdsm-18': '&includedTags[]=b29d6a3d-1569-4e7a-8caf-7557bc92cd5d',
+  'mangadex-reverse-harem-18': '&includedTags[]=65761a2a-415e-47f3-bef2-a9dababba7a6',
+};
+
 export class DynamicMangaDexSource implements ISource {
   id: string;
   name: string;
@@ -559,6 +917,22 @@ export class DynamicMangaDexSource implements ISource {
     };
   }
 
+  getCategories(): { id: string; label: string }[] {
+    return [
+      { id: 'views', label: '🔥 Top Followed' },
+      { id: 'updated', label: '🕒 Recently Updated' },
+      { id: 'new', label: '✨ New Additions' },
+      { id: 'rating', label: '⭐ Top Rated' },
+      { id: 'manhwa', label: '🇰🇷 Manhwa (Korean)' },
+      { id: 'manhua', label: '🇨🇳 Manhua (Chinese)' },
+      { id: 'manga', label: '🇯🇵 Manga (Japanese)' },
+      { id: 'action', label: '💥 Action' },
+      { id: 'fantasy', label: '⚔️ Fantasy' },
+      { id: 'isekai', label: '🌀 Isekai' },
+      { id: 'romance', label: '❤️ Romance' },
+    ];
+  }
+
   async getMangaList(page: number = 1, category: string = 'views'): Promise<Manga[]> {
     try {
       const offset = (page - 1) * 20;
@@ -566,12 +940,57 @@ export class DynamicMangaDexSource implements ISource {
         ? '&contentRating[]=erotica&contentRating[]=pornographic'
         : '&contentRating[]=safe&contentRating[]=suggestive';
 
+      const catLower = (category || 'views').toLowerCase();
       let orderParam = 'order[followedCount]=desc';
-      if (category === 'new-manga' || category === 'new' || category === 'latest') {
+      let extraFilter = '';
+
+      if (catLower === 'new' || catLower === 'new-manga') {
         orderParam = 'order[createdAt]=desc';
+      } else if (catLower === 'updated' || catLower === 'latest') {
+        orderParam = 'order[latestUploadedChapter]=desc';
+      } else if (catLower === 'rating') {
+        orderParam = 'order[rating]=desc';
+      } else if (catLower === 'manhwa') {
+        extraFilter = '&originalLanguage[]=ko';
+      } else if (catLower === 'manhua') {
+        extraFilter = '&originalLanguage[]=zh';
+      } else if (catLower === 'manga') {
+        extraFilter = '&originalLanguage[]=ja';
+      } else if (catLower === 'action') {
+        extraFilter = '&includedTags[]=391b0423-d847-456f-aff0-8b0cfc03066b';
+      } else if (catLower === 'fantasy') {
+        extraFilter = '&includedTags[]=cdc58593-87dd-415e-bbc0-2ec27bf404cc';
+      } else if (catLower === 'isekai') {
+        extraFilter = '&includedTags[]=ace04997-f6bd-436e-b261-779182193d3d';
+      } else if (catLower === 'romance') {
+        extraFilter = '&includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d';
       }
 
-      const url = `${this.baseUrl}/manga?limit=20&offset=${offset}&includes[]=cover_art&includes[]=author${ratings}&${orderParam}`;
+      if (MANGADEX_ID_FILTERS[this.id]) {
+        extraFilter += MANGADEX_ID_FILTERS[this.id];
+      } else if (this.id.includes('doujinshi')) {
+        extraFilter += '&includedTags[]=b13b2a48-c720-44a9-9c77-39c9979373fb';
+      } else if (this.id.includes('romance')) {
+        extraFilter += '&includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d';
+      } else if (this.id.includes('yaoi') || this.id.includes('bl')) {
+        extraFilter += '&includedTags[]=5920b825-4181-4a17-beeb-9918b0ff7a30';
+      } else if (this.id.includes('yuri') || this.id.includes('gl')) {
+        extraFilter += '&includedTags[]=a3c67850-4684-404e-9b7f-c69850ee5da6';
+      } else if (this.id.includes('harem')) {
+        extraFilter += '&includedTags[]=aafb99c1-7f60-43fa-b75f-fc9502ce29c7';
+      } else if (this.id.includes('manhwa')) {
+        extraFilter += '&originalLanguage[]=ko';
+      } else if (this.id.includes('manhua')) {
+        extraFilter += '&originalLanguage[]=zh';
+      } else if (this.id.includes('manga') && !this.id.includes('mangadex-org')) {
+        extraFilter += '&originalLanguage[]=ja';
+      } else if (this.id.includes('isekai')) {
+        extraFilter += '&includedTags[]=ace04997-f6bd-436e-b261-779182193d3d';
+      } else if (this.id.includes('action')) {
+        extraFilter += '&includedTags[]=391b0423-d847-456f-aff0-8b0cfc03066b';
+      }
+
+      const url = `${this.baseUrl}/manga?limit=20&offset=${offset}&includes[]=cover_art&includes[]=author${ratings}&${orderParam}${extraFilter}`;
       const res = await fetch(url, { headers: this.headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -613,7 +1032,27 @@ export class DynamicMangaDexSource implements ISource {
       const ratings = this.isNsfw
         ? '&contentRating[]=erotica&contentRating[]=pornographic'
         : '&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica';
-      const url = `${this.baseUrl}/manga?title=${encodeURIComponent(query)}&limit=20&includes[]=cover_art&includes[]=author${ratings}`;
+      let extraFilter = '';
+      if (MANGADEX_ID_FILTERS[this.id]) {
+        extraFilter += MANGADEX_ID_FILTERS[this.id];
+      } else if (this.id.includes('doujinshi')) {
+        extraFilter += '&includedTags[]=b13b2a48-c720-44a9-9c77-39c9979373fb';
+      } else if (this.id.includes('romance')) {
+        extraFilter += '&includedTags[]=423e2eae-a7a2-4a8b-ac03-a8351462d71d';
+      } else if (this.id.includes('yaoi') || this.id.includes('bl')) {
+        extraFilter += '&includedTags[]=5920b825-4181-4a17-beeb-9918b0ff7a30';
+      } else if (this.id.includes('yuri') || this.id.includes('gl')) {
+        extraFilter += '&includedTags[]=a3c67850-4684-404e-9b7f-c69850ee5da6';
+      } else if (this.id.includes('harem')) {
+        extraFilter += '&includedTags[]=aafb99c1-7f60-43fa-b75f-fc9502ce29c7';
+      } else if (this.id.includes('manhwa')) {
+        extraFilter += '&originalLanguage[]=ko';
+      } else if (this.id.includes('manhua')) {
+        extraFilter += '&originalLanguage[]=zh';
+      } else if (this.id.includes('manga') && !this.id.includes('mangadex-org')) {
+        extraFilter += '&originalLanguage[]=ja';
+      }
+      const url = `${this.baseUrl}/manga?title=${encodeURIComponent(query)}&limit=20&includes[]=cover_art&includes[]=author${ratings}${extraFilter}`;
       const res = await fetch(url, { headers: this.headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -836,16 +1275,22 @@ export class DynamicMangaDexSource implements ISource {
       return fallbackSource.getPageList(targetChUrl);
     }
 
-    // 2. Handle native MangaDex @home server
-    const url = `${this.baseUrl}/at-home/server/${chapterId}`;
+    // 2. Handle native MangaDex @home server with standard port 443
+    const url = `${this.baseUrl}/at-home/server/${chapterId}?forcePort443=true`;
     const res = await fetch(url, { headers: this.headers });
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching chapter pages`);
     const json = await res.json();
     const hash = json.chapter?.hash;
-    const pages = (json.chapter?.data || []).map((file: string, idx: number) => ({
+    const baseNode = json.baseUrl || 'https://uploads.mangadex.org';
+    const isDataSaver = !Array.isArray(json.chapter?.data) || json.chapter.data.length === 0;
+    const fileList: string[] = isDataSaver ? (json.chapter?.dataSaver || []) : json.chapter.data;
+    const subFolder = isDataSaver ? 'data-saver' : 'data';
+
+    const pages: Page[] = fileList.map((file: string, idx: number) => ({
       index: idx,
-      url: `${json.baseUrl}/data/${hash}/${file}`,
+      url: `${baseNode}/${subFolder}/${hash}/${file}`,
     }));
+
     if (pages.length === 0) {
       throw new Error('This chapter has not yet been published with pages by the source provider.');
     }

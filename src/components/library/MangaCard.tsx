@@ -16,28 +16,30 @@ interface MangaCardProps {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 
-export const MangaCard: React.FC<MangaCardProps> = ({
-  manga,
-  onPress,
-  onLongPress,
-  width = CARD_WIDTH,
-  blurCover = false,
-}) => {
-  const isNsfw = Boolean(
-    manga.isNsfw ||
-      manga.sourceId?.toLowerCase().includes('18') ||
-      manga.sourceName?.includes('18+')
-  );
-  const shouldBlur = isNsfw && blurCover;
+export const MangaCard = React.memo<MangaCardProps>(
+  ({
+    manga,
+    onPress,
+    onLongPress,
+    width = CARD_WIDTH,
+    blurCover = false,
+  }) => {
+    const isNsfw = Boolean(
+      manga.isNsfw ||
+        manga.sourceId?.toLowerCase().includes('18') ||
+        manga.sourceName?.includes('18+')
+    );
+    const shouldBlur = isNsfw && blurCover;
 
-  return (
-    <TouchableOpacity
-      style={[styles.container, { width }]}
-      onPress={() => onPress(manga)}
-      onLongPress={onLongPress ? () => onLongPress(manga) : undefined}
-      delayLongPress={350}
-      activeOpacity={0.8}
-    >
+    return (
+      <TouchableOpacity
+        style={[styles.container, { width }]}
+        onPress={() => onPress(manga)}
+        onLongPress={onLongPress ? () => onLongPress(manga) : undefined}
+        delayLongPress={350}
+        delayPressIn={0}
+        activeOpacity={0.8}
+      >
       <View style={styles.imageContainer}>
         <Image
           source={{
@@ -51,7 +53,10 @@ export const MangaCard: React.FC<MangaCardProps> = ({
           }}
           style={styles.coverImage}
           contentFit="cover"
-          transition={200}
+          transition={150}
+          cachePolicy="memory-disk"
+          priority="high"
+          recyclingKey={manga.id || manga.coverUrl}
           blurRadius={shouldBlur ? 16 : 0}
         />
 
@@ -102,7 +107,17 @@ export const MangaCard: React.FC<MangaCardProps> = ({
       </View>
     </TouchableOpacity>
   );
-};
+}, (prev, next) => {
+  return (
+    prev.manga.id === next.manga.id &&
+    prev.manga.title === next.manga.title &&
+    prev.manga.coverUrl === next.manga.coverUrl &&
+    prev.manga.isFavorite === next.manga.isFavorite &&
+    prev.manga.unreadCount === next.manga.unreadCount &&
+    prev.width === next.width &&
+    prev.blurCover === next.blurCover
+  );
+});
 
 const styles = StyleSheet.create({
   container: {

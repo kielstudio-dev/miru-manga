@@ -14,6 +14,7 @@ import { ReaderView } from './src/components/reader/ReaderView';
 import { BottomNavBar, MainTabType } from './src/components/navigation/BottomNavBar';
 import { initializeInstalledExtensions } from './src/services/extensions/manager';
 import { getDownloadedMangaList } from './src/services/downloads';
+import { checkFavoriteMangaUpdates } from './src/services/updates';
 import { colors } from './src/theme/colors';
 
 type Screen = 'main' | 'manga-detail' | 'reader';
@@ -21,14 +22,24 @@ type Screen = 'main' | 'manga-detail' | 'reader';
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('main');
   const [activeTab, setActiveTab] = useState<MainTabType>('bookmarks');
+  const [tabHistory, setTabHistory] = useState<MainTabType[]>(['bookmarks']);
   const [selectedManga, setSelectedManga] = useState<Manga | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
   const [downloadCount, setDownloadCount] = useState<number>(0);
 
-  // Initialize dynamic extensions on launch
+  const [visitedTabs, setVisitedTabs] = useState<Record<MainTabType, boolean>>({
+    bookmarks: true,
+    downloads: false,
+    extensions: false,
+    settings: false,
+  });
+
+  // Initialize dynamic extensions & check favorite updates in background on launch
   useEffect(() => {
     initializeInstalledExtensions();
+    // Non-blocking silent update check for favorited titles
+    checkFavoriteMangaUpdates().catch(() => {});
   }, []);
 
   // Update download count badge
@@ -41,9 +52,35 @@ export default function App() {
     }
   }, []);
 
+  // Refresh download badge only on screen transitions back to main, NOT on every tab switch
   useEffect(() => {
-    refreshDownloadCount();
-  }, [refreshDownloadCount, currentScreen, activeTab]);
+    if (currentScreen === 'main') {
+      refreshDownloadCount();
+    }
+  }, [refreshDownloadCount, currentScreen]);
+
+  const handleSelectTab = useCallback((tab: MainTabType) => {
+    setActiveTab((cur) => {
+      if (cur !== tab) {
+        setTabHistory((prev) => [...prev, tab]);
+        return tab;
+      }
+      return cur;
+    });
+    setVisitedTabs((prev) => (prev[tab] ? prev : { ...prev, [tab]: true }));
+  }, []);
+
+  const handleNavigateToExtensions = useCallback(() => {
+    handleSelectTab('extensions');
+  }, [handleSelectTab]);
+
+  const handleNavigateToDownloads = useCallback(() => {
+    handleSelectTab('downloads');
+  }, [handleSelectTab]);
+
+  const handleNavigateToBookmarks = useCallback(() => {
+    handleSelectTab('bookmarks');
+  }, [handleSelectTab]);
 
   // Android hardware back button handler
   useEffect(() => {
@@ -56,34 +93,40 @@ export default function App() {
         setCurrentScreen('main');
         return true;
       }
-      if (currentScreen === 'main' && activeTab !== 'bookmarks') {
-        setActiveTab('bookmarks');
-        return true;
+      if (currentScreen === 'main') {
+        if (tabHistory.length > 1) {
+          const nextHistory = [...tabHistory];
+          nextHistory.pop(); // remove current tab
+          const previousTab = nextHistory[nextHistory.length - 1];
+          setTabHistory(nextHistory);
+          setActiveTab(previousTab);
+          return true;
+        }
       }
       return false;
     };
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => subscription.remove();
-  }, [currentScreen, activeTab]);
+  }, [currentScreen, tabHistory]);
 
-  const handleOpenManga = (manga: Manga) => {
+  const handleOpenManga = useCallback((manga: Manga) => {
     setSelectedManga(manga);
     setCurrentScreen('manga-detail');
-  };
+  }, []);
 
-  const handleOpenChapter = (chapter: Chapter, chapters: Chapter[]) => {
+  const handleOpenChapter = useCallback((chapter: Chapter, chapters: Chapter[]) => {
     setSelectedChapter(chapter);
     setAllChapters(chapters);
     setCurrentScreen('reader');
-  };
+  }, []);
 
-  const handleOpenChapterFromDownloads = (chapter: Chapter, chapters: Chapter[], manga: Manga) => {
+  const handleOpenChapterFromDownloads = useCallback((chapter: Chapter, chapters: Chapter[], manga: Manga) => {
     setSelectedManga(manga);
     setSelectedChapter(chapter);
     setAllChapters(chapters);
     setCurrentScreen('reader');
-  };
+  }, []);
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -93,46 +136,54 @@ export default function App() {
           {/* Main 4-Tab Container with Permanent Bottom Navigation Bar */}
           <View style={[styles.mainContainer, currentScreen !== 'main' && styles.hidden]}>
             {/* Tab 1: Bookmarks / Favorites Screen */}
-            <View style={[styles.tabContent, activeTab !== 'bookmarks' && styles.hidden]}>
-              <BookmarksScreen
-                onOpenManga={handleOpenManga}
-                onNavigateToExtensions={() => setActiveTab('extensions')}
-                onNavigateToDownloads={() => setActiveTab('downloads')}
-                isFocused={currentScreen === 'main' && activeTab === 'bookmarks'}
-              />
-            </View>
+            {visitedTabs.bookmarks && (
+              <View style={[styles.tabContent, activeTab !== 'bookmarks' && styles.hidden]}>
+                <BookmarksScreen
+                  onOpenManga={handleOpenManga}
+                  onNavigateToExtensions={handleNavigateToExtensions}
+                  onNavigateToDownloads={handleNavigateToDownloads}
+                  isFocused={currentScreen === 'main' && activeTab === 'bookmarks'}
+                />
+              </View>
+            )}
 
             {/* Tab 2: Downloads Screen */}
-            <View style={[styles.tabContent, activeTab !== 'downloads' && styles.hidden]}>
-              <DownloadsScreen
-                onOpenManga={handleOpenManga}
-                onOpenChapter={handleOpenChapterFromDownloads}
-                onNavigateToBookmarks={() => setActiveTab('bookmarks')}
-                onNavigateToExtensions={() => setActiveTab('extensions')}
-                isFocused={currentScreen === 'main' && activeTab === 'downloads'}
-              />
-            </View>
+            {visitedTabs.downloads && (
+              <View style={[styles.tabContent, activeTab !== 'downloads' && styles.hidden]}>
+                <DownloadsScreen
+                  onOpenManga={handleOpenManga}
+                  onOpenChapter={handleOpenChapterFromDownloads}
+                  onNavigateToBookmarks={handleNavigateToBookmarks}
+                  onNavigateToExtensions={handleNavigateToExtensions}
+                  isFocused={currentScreen === 'main' && activeTab === 'downloads'}
+                />
+              </View>
+            )}
 
             {/* Tab 3: Extensions Screen */}
-            <View style={[styles.tabContent, activeTab !== 'extensions' && styles.hidden]}>
-              <ExtensionsScreen
-                onOpenManga={handleOpenManga}
-                showBackButton={false}
-                isFocused={currentScreen === 'main' && activeTab === 'extensions'}
-              />
-            </View>
+            {visitedTabs.extensions && (
+              <View style={[styles.tabContent, activeTab !== 'extensions' && styles.hidden]}>
+                <ExtensionsScreen
+                  onOpenManga={handleOpenManga}
+                  showBackButton={false}
+                  isFocused={currentScreen === 'main' && activeTab === 'extensions'}
+                />
+              </View>
+            )}
 
             {/* Tab 4: Settings Screen */}
-            <View style={[styles.tabContent, activeTab !== 'settings' && styles.hidden]}>
-              <SettingsScreen
-                showBackButton={false}
-              />
-            </View>
+            {visitedTabs.settings && (
+              <View style={[styles.tabContent, activeTab !== 'settings' && styles.hidden]}>
+                <SettingsScreen
+                  showBackButton={false}
+                />
+              </View>
+            )}
 
             {/* Permanent Bottom Navigation Bar docked across all 4 main tabs */}
             <BottomNavBar
               currentTab={activeTab}
-              onSelectTab={setActiveTab}
+              onSelectTab={handleSelectTab}
               downloadCount={downloadCount}
             />
           </View>

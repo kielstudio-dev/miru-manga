@@ -11,6 +11,7 @@ import {
   Platform,
   Modal,
   ScrollView,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -38,6 +39,7 @@ import {
   saveSettings,
 } from '../services/storage';
 import { colors } from '../theme/colors';
+import { getCachedCatalog, setCachedCatalog } from '../services/catalogCache';
 
 const ONLINE_CATEGORIES = [
   { id: 'views', label: '🔥 Top' },
@@ -57,7 +59,7 @@ interface ExtensionsScreenProps {
   isFocused?: boolean;
 }
 
-export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
+export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
   onBack,
   onOpenManga,
   showBackButton = false,
@@ -144,9 +146,11 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
     }
   };
 
-  const loadData = async () => {
+  const loadData = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) {
+        setLoading(true);
+      }
       const [list, repos, curSettings] = await Promise.all([
         fetchRepositoryExtensions(),
         getCustomRepos(),
@@ -220,8 +224,10 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (isFocused) {
+      loadData(extensions.length > 0);
+    }
+  }, [isFocused]);
 
   const handleInstall = async (ext: ExtensionManifest) => {
     try {
@@ -248,10 +254,40 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
     }
   };
 
+  // Android hardware back handler for sub-views within ExtensionsScreen
+  useEffect(() => {
+    if (!isFocused) return;
+    const onBackPress = () => {
+      if (quickActionVisible) {
+        setQuickActionVisible(false);
+        return true;
+      }
+      if (repoModalVisible) {
+        setRepoModalVisible(false);
+        return true;
+      }
+      if (browsingExtension) {
+        if (browseSearchQuery) {
+          setBrowseSearchQuery('');
+          return true;
+        }
+        setBrowsingExtension(null);
+        return true;
+      }
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [isFocused, browsingExtension, browseSearchQuery, quickActionVisible, repoModalVisible]);
+
   // Browse titles from an installed extension
   const handleBrowseSource = (ext: ExtensionManifest) => {
     setBrowseSearchQuery('');
-    setBrowseCategory('views');
+    const src = sourceRegistry.get(ext.id);
+    const cats = src?.getCategories ? src.getCategories() : ONLINE_CATEGORIES;
+    const initialCat = cats[0]?.id || 'views';
+    setBrowseCategory(initialCat);
     setBrowsePage(1);
     setBrowsingExtension(ext);
   };
@@ -276,22 +312,38 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
           setBrowseHasMore(false);
         } else {
           if (page === 1) {
-            // Pre-fetch pages 1 & 2 for rich 36-40+ catalog
-            const [p1, p2] = await Promise.all([
-              source.getMangaList(1, cat),
-              source.getMangaList(2, cat).catch(() => []),
-            ]);
-            const seen = new Set<string>();
-            const combined: Manga[] = [];
-            for (const item of [...p1, ...p2]) {
-              if (!seen.has(item.id)) {
-                seen.add(item.id);
-                combined.push(item);
-              }
+            // Step 1: Check instant local cache for 0ms visual rendering
+            const cached = await getCachedCatalog(browsingExtension.id, cat, 1);
+            if (cached && cached.length > 0) {
+              setExtensionMangaList(cached);
+              setBrowsingLoading(false);
             }
-            setExtensionMangaList(combined);
-            setBrowsePage(p2.length > 0 ? 2 : 1);
-            setBrowseHasMore(p2.length > 0);
+
+            // Step 2: Fetch fresh catalog in background (Stale-While-Revalidate)
+            try {
+              const p1 = await source.getMangaList(1, cat);
+              if (p1 && p1.length > 0) {
+                setExtensionMangaList(p1);
+                setBrowsePage(1);
+                setBrowseHasMore(true);
+                await setCachedCatalog(browsingExtension.id, cat, 1, p1);
+
+                // Proactively prefetch top covers for instant display
+                for (let i = 0; i < Math.min(10, p1.length); i++) {
+                  const cUrl = p1[i]?.coverUrl;
+                  if (cUrl && cUrl.startsWith('http')) {
+                    Image.prefetch(cUrl).catch(() => {});
+                  }
+                }
+              }
+            } catch (err) {
+              // If background fetch failed but we had cache, retain cached results
+              if (!cached || cached.length === 0) {
+                setExtensionMangaList([]);
+              }
+            } finally {
+              setBrowsingLoading(false);
+            }
           } else {
             const list = await source.getMangaList(page, cat);
             if (list.length === 0) {
@@ -303,6 +355,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 return [...prev, ...newlyAdded];
               });
               setBrowsePage(page);
+              setCachedCatalog(browsingExtension.id, cat, page, list).catch(() => {});
             }
           }
         }
@@ -366,10 +419,16 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
         e.lang.toLowerCase().includes(q) ||
         (e.description && e.description.toLowerCase().includes(q))
       );
-    });
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   // View: Browsing Manga from selected extension
   if (browsingExtension) {
+    const activeBrowsingSource = sourceRegistry.get(browsingExtension.id);
+    const sourceCategories = activeBrowsingSource?.getCategories
+      ? activeBrowsingSource.getCategories()
+      : ONLINE_CATEGORIES;
+
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
@@ -417,7 +476,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.categoryChipsContainer}
               >
-                {ONLINE_CATEGORIES.map((cat) => {
+                {sourceCategories.map((cat) => {
                   const isActive = browseCategory === cat.id;
                   return (
                     <TouchableOpacity
@@ -461,6 +520,10 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
               contentContainerStyle={styles.browseListContent}
               onEndReached={handleLoadMoreBrowse}
               onEndReachedThreshold={0.5}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === 'android'}
               ListFooterComponent={
                 browseLoadingMore ? (
                   <View style={{ paddingVertical: 18, alignItems: 'center' }}>
@@ -497,6 +560,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                         style={styles.browseCardCover as any}
                         contentFit="cover"
                         transition={150}
+                        cachePolicy="memory-disk"
                       />
                       {isBookmarked && (
                         <View style={styles.browseBookmarkBadge}>
@@ -743,6 +807,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'available' && styles.activeTabBtn]}
             onPress={() => setActiveTab('available')}
+            delayPressIn={0}
           >
             <Text
               style={[styles.tabText, activeTab === 'available' && styles.activeTabText]}
@@ -754,6 +819,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'installed' && styles.activeTabBtn]}
             onPress={() => setActiveTab('installed')}
+            delayPressIn={0}
           >
             <Text
               style={[styles.tabText, activeTab === 'installed' && styles.activeTabText]}
@@ -810,6 +876,10 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
             data={filteredExtensions}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === 'android'}
             renderItem={({ item }) => (
               <View style={styles.extensionCard}>
                 <View style={styles.extensionIconContainer}>
@@ -826,7 +896,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                 </View>
 
                 <View style={styles.extensionInfo}>
-                  <Text style={styles.extensionName} numberOfLines={1}>
+                  <Text style={styles.extensionName} numberOfLines={2}>
                     {item.name}
                   </Text>
                   <View style={styles.metaRow}>
@@ -852,6 +922,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                       <TouchableOpacity
                         style={styles.browseBtn}
                         onPress={() => handleBrowseSource(item)}
+                        delayPressIn={0}
                       >
                         <Ionicons name="compass-outline" size={16} color="#ffffff" />
                         <Text style={styles.browseBtnText}>Browse</Text>
@@ -861,6 +932,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                         style={styles.uninstallBtn}
                         onPress={() => handleUninstall(item)}
                         disabled={actionLoadingId === item.id}
+                        delayPressIn={0}
                       >
                         <Ionicons name="trash-outline" size={18} color={colors.danger} />
                       </TouchableOpacity>
@@ -870,6 +942,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
                       style={styles.installBtn}
                       onPress={() => handleInstall(item)}
                       disabled={actionLoadingId === item.id}
+                      delayPressIn={0}
                     >
                       {actionLoadingId === item.id ? (
                         <ActivityIndicator size="small" color="#ffffff" />
@@ -1080,7 +1153,7 @@ export const ExtensionsScreen: React.FC<ExtensionsScreenProps> = ({
       </SafeAreaView>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -1220,6 +1293,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 3,
+    lineHeight: 18,
   },
   metaRow: {
     flexDirection: 'row',
@@ -1261,20 +1335,21 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   actionsGroup: {
-    marginLeft: 8,
+    marginLeft: 6,
+    justifyContent: 'center',
   },
   installedActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   browseBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderRadius: 8,
   },
   browseBtnText: {
@@ -1283,7 +1358,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   uninstallBtn: {
-    padding: 7,
+    padding: 6,
     borderRadius: 8,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },

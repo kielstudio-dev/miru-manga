@@ -21,7 +21,7 @@ interface TabConfig {
   badge?: number;
 }
 
-export const BottomNavBar: React.FC<BottomNavBarProps> = ({
+export const BottomNavBar = React.memo<BottomNavBarProps>(({
   currentTab,
   onSelectTab,
   downloadCount = 0,
@@ -75,6 +75,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
               key={tab.id}
               style={styles.tabButton}
               onPress={() => onSelectTab(tab.id)}
+              delayPressIn={0}
               activeOpacity={0.7}
               accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
@@ -112,7 +113,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
       </View>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

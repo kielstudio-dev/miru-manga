@@ -11,6 +11,7 @@ import {
   Modal,
   ActivityIndicator,
   Linking,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,7 @@ import { subscribeToProStatus, setUserPro, restorePurchases } from '../services/
 import { getCloudSyncStatus, performFullCloudSync, CloudSyncStatus } from '../services/cloudSync';
 import { signInOrLinkGoogle, signOutAndResetToGuest } from '../services/auth';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
+import { FeedbackCategory, submitFeedback, openSupportEmail, SUPPORT_EMAIL } from '../services/feedback';
 import { colors } from '../theme/colors';
 
 interface SettingsScreenProps {
@@ -31,7 +33,7 @@ interface SettingsScreenProps {
   showBackButton?: boolean;
 }
 
-export const SettingsScreen: React.FC<SettingsScreenProps> = ({
+export const SettingsScreen = React.memo<SettingsScreenProps>(({
   onBack,
   showBackButton = false,
 }) => {
@@ -57,6 +59,17 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   // OTA Updates State
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  // Feedback & Support State
+  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState<FeedbackCategory>('bug');
+  const [feedbackTitle, setFeedbackTitle] = useState('');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackEmail, setFeedbackEmail] = useState('');
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+
+  // Legal / DMCA State
+  const [dmcaModalVisible, setDmcaModalVisible] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -150,6 +163,35 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     } finally {
       setCheckingUpdate(false);
     }
+  };
+
+  const handleSendFeedback = async () => {
+    if (!feedbackTitle.trim() || !feedbackMessage.trim()) {
+      Alert.alert('Required Fields', 'Please enter a title and a description describing the issue or feedback.');
+      return;
+    }
+    setSubmittingFeedback(true);
+    // Asynchronously log to Supabase in background if table is available
+    submitFeedback({
+      category: feedbackCategory,
+      title: feedbackTitle,
+      message: feedbackMessage,
+      userEmail: feedbackEmail,
+    }).catch(() => {});
+
+    // Open direct email immediately with the clean message
+    await openSupportEmail({
+      category: feedbackCategory,
+      title: feedbackTitle,
+      message: feedbackMessage,
+      userEmail: feedbackEmail,
+    });
+
+    setSubmittingFeedback(false);
+    setFeedbackModalVisible(false);
+    setFeedbackTitle('');
+    setFeedbackMessage('');
+    setFeedbackEmail('');
   };
 
   const handleToggleNsfw = async (value: boolean) => {
@@ -292,7 +334,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Vortex Membership Section */}
-          <Text style={styles.sectionHeader}>Membership & Monetization</Text>
+          <Text style={styles.sectionHeader}>Membership</Text>
           <View style={[styles.card, isPro ? styles.proCard : styles.freeCard]}>
             <View style={styles.membershipHeader}>
               <View style={[styles.membershipIconWrap, isPro && styles.membershipIconWrapPro]}>
@@ -621,6 +663,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 style={styles.checkUpdateBtn}
                 onPress={handleCheckForUpdates}
                 disabled={checkingUpdate}
+                delayPressIn={0}
                 activeOpacity={0.8}
               >
                 {checkingUpdate ? (
@@ -635,43 +678,99 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </View>
           </View>
 
-          {/* Legal Guardrail & Architecture Notice */}
-          <Text style={styles.sectionHeader}>Architecture & Play Store Safety</Text>
+          {/* Help & User Support Section */}
+          <Text style={styles.sectionHeader}>Help & User Support</Text>
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.actionRow}
+              onPress={() => setFeedbackModalVisible(true)}
+              delayPressIn={0}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.rowLabel}>Report an Issue / Send Feedback</Text>
+                  <View style={styles.feedbackBadge}>
+                    <Text style={styles.feedbackBadgeText}>Direct</Text>
+                  </View>
+                </View>
+                <Text style={styles.rowSubtitle}>
+                  Report broken chapters, app bugs, missing images, or suggest new manga extensions.
+                </Text>
+              </View>
+              <Ionicons name="chatbubbles-outline" size={22} color={colors.accent} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionRow, { borderTopWidth: 1, borderTopColor: colors.border }]}
+              onPress={() => openSupportEmail()}
+              delayPressIn={0}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={styles.rowLabel}>Email Developer Support</Text>
+                <Text style={styles.rowSubtitle}>
+                  Direct contact: {SUPPORT_EMAIL}
+                </Text>
+              </View>
+              <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Legal Guardrail, DMCA & Architecture Notice */}
+          <Text style={styles.sectionHeader}>Legal, DMCA & Play Store Compliance</Text>
           <View style={[styles.card, styles.complianceCard]}>
             <View style={styles.complianceHeader}>
               <Ionicons name="shield-checkmark" size={22} color={colors.accent} />
               <Text style={styles.complianceTitle}>Independent Media Player Legal Model</Text>
             </View>
             <Text style={styles.complianceText}>
-              • <Text style={styles.boldText}>Zero Copyright Infringement:</Text> This application
-              operates purely as an independent media file player. It contains no hosted pirated content,
-              scrapers, or unlawful distribution channels.
+              • <Text style={styles.boldText}>Zero Copyright Infringement:</Text> Miru Manga operates purely
+              as an independent media file player. It contains no hosted pirated content, pre-bundled scrapers,
+              or unauthorized copyrighted distribution channels.
             </Text>
             <Text style={styles.complianceText}>
               • <Text style={styles.boldText}>User-Provided Content:</Text> All local files (.cbz, .zip, .cbr)
-              are processed solely on the device's local filesystem.
+              and custom community repositories are configured and processed solely on the device's local filesystem.
             </Text>
             <Text style={styles.complianceText}>
-              • <Text style={styles.boldText}>Safe Monetization Blueprint:</Text> This architecture complies
-              with Google Play & App Store policies, allowing legitimate monetization through reading tools,
-              cloud sync, and non-intrusive AdMob banner placement.
+              • <Text style={styles.boldText}>Google Play Policy Compliance:</Text> This architecture complies
+              with Google Play Developer Policies, supporting reading tools, cloud backup, and non-intrusive banner placement.
             </Text>
 
-            <TouchableOpacity
-              style={styles.privacyLinkRow}
-              onPress={() => Linking.openURL('https://kielstudio-dev.github.io/miru-manga/privacy.html')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="shield-checkmark" size={16} color="#10b981" />
-              <Text style={styles.privacyLinkText}>Official Privacy Policy</Text>
-              <Ionicons name="open-outline" size={14} color="#a78bfa" />
-            </TouchableOpacity>
+            <View style={styles.legalActionsList}>
+              <TouchableOpacity
+                style={styles.legalActionRow}
+                onPress={() => setDmcaModalVisible(true)}
+                delayPressIn={0}
+                activeOpacity={0.7}
+              >
+                <View style={styles.legalActionIconWrap}>
+                  <Ionicons name="document-text-outline" size={16} color="#a78bfa" />
+                </View>
+                <Text style={styles.legalActionTitle}>DMCA Takedown Notice</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.legalActionRow, styles.legalActionRowBorder]}
+                onPress={() => Linking.openURL('https://kielstudio-dev.github.io/miru-manga/privacy.html')}
+                delayPressIn={0}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.legalActionIconWrap, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                  <Ionicons name="shield-checkmark" size={16} color="#10b981" />
+                </View>
+                <Text style={[styles.legalActionTitle, { color: '#10b981' }]}>Official Privacy Policy</Text>
+                <Ionicons name="open-outline" size={15} color="#10b981" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Miru Manga v1.0.0 • Kiel Studio Devs</Text>
             <Text style={[styles.footerText, { marginTop: 4, color: colors.textMuted }]}>
-              Support: kielstudio.dev@gmail.com
+              Support: {SUPPORT_EMAIL}
             </Text>
           </View>
         </ScrollView>
@@ -681,6 +780,196 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           visible={proModalVisible}
           onClose={() => setProModalVisible(false)}
         />
+
+        {/* In-App Feedback & Problem Reporting Modal */}
+        <Modal
+          visible={feedbackModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setFeedbackModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.feedbackModalContainer}>
+              <View style={styles.feedbackModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="chatbubbles" size={22} color={colors.accent} />
+                  <Text style={styles.feedbackModalTitle}>Send Feedback / Report</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setFeedbackModalVisible(false)}
+                  style={styles.feedbackCloseBtn}
+                >
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.feedbackModalSubtitle}>
+                Encountered a bug, broken chapter, or want a new manga source? Let us know directly.
+              </Text>
+
+              {/* Category Pills */}
+              <Text style={styles.feedbackFieldLabel}>Select Category</Text>
+              <View style={styles.categoryPillsRow}>
+                {(
+                  [
+                    { id: 'bug', label: '🐛 Bug / Crash' },
+                    { id: 'broken_manga', label: '📖 Broken Manga' },
+                    { id: 'request_extension', label: '🧩 New Extension' },
+                    { id: 'general', label: '💡 Suggestion' },
+                  ] as { id: FeedbackCategory; label: string }[]
+                ).map((cat) => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      styles.categoryPill,
+                      feedbackCategory === cat.id && styles.categoryPillActive,
+                    ]}
+                    onPress={() => setFeedbackCategory(cat.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryPillText,
+                        feedbackCategory === cat.id && styles.categoryPillTextActive,
+                      ]}
+                    >
+                      {cat.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Title / Subject */}
+              <Text style={styles.feedbackFieldLabel}>Title / Subject</Text>
+              <TextInput
+                style={styles.feedbackInput}
+                placeholder="e.g. Asura Scans chapter 5 failed to load"
+                placeholderTextColor={colors.textMuted}
+                value={feedbackTitle}
+                onChangeText={setFeedbackTitle}
+                maxLength={100}
+              />
+
+              {/* Message */}
+              <Text style={styles.feedbackFieldLabel}>Details / Description</Text>
+              <TextInput
+                style={[styles.feedbackInput, styles.feedbackTextarea]}
+                placeholder="Describe what happened or what extension you'd like added..."
+                placeholderTextColor={colors.textMuted}
+                value={feedbackMessage}
+                onChangeText={setFeedbackMessage}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                maxLength={1000}
+              />
+
+              {/* Optional Email */}
+              <Text style={styles.feedbackFieldLabel}>Your Email (Optional, for follow-up)</Text>
+              <TextInput
+                style={styles.feedbackInput}
+                placeholder="you@example.com"
+                placeholderTextColor={colors.textMuted}
+                value={feedbackEmail}
+                onChangeText={setFeedbackEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              {/* Single Clear Action Button */}
+              <View style={styles.feedbackActionsRow}>
+                <TouchableOpacity
+                  style={styles.feedbackSubmitBtn}
+                  onPress={handleSendFeedback}
+                  disabled={submittingFeedback}
+                  activeOpacity={0.8}
+                >
+                  {submittingFeedback ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <>
+                      <Ionicons name="mail" size={16} color="#ffffff" />
+                      <Text style={styles.feedbackSubmitText}>Send Feedback via Email</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* DMCA Takedown Notice Modal */}
+        <Modal
+          visible={dmcaModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDmcaModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.dmcaModalContainer}>
+              <View style={styles.dmcaHeaderRow}>
+                <Ionicons name="shield-checkmark" size={24} color={colors.accent} />
+                <Text style={styles.dmcaTitle}>DMCA Takedown Policy</Text>
+                <TouchableOpacity
+                  onPress={() => setDmcaModalVisible(false)}
+                  style={styles.feedbackCloseBtn}
+                >
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+                <Text style={styles.dmcaBodyText}>
+                  Miru Manga respects the intellectual property rights of creators and copyright owners and
+                  operates in strict compliance with the Digital Millennium Copyright Act (17 U.S.C. § 512).
+                  {'\n\n'}
+                  <Text style={styles.boldText}>Independent Media Player Architecture:</Text>
+                  {'\n'}
+                  Miru Manga does not host, upload, store, or transmit any copyrighted comic images or
+                  media files. The software functions strictly as an offline media reader and web client
+                  utility (similar to a generic web browser or video player).
+                  {'\n\n'}
+                  <Text style={styles.boldText}>Filing a Formal DMCA Notice:</Text>
+                  {'\n'}
+                  If you are a copyright owner or authorized agent and believe content accessible through
+                  third-party community repositories infringes your copyright, please submit a notice to
+                  our Designated Copyright Agent with:
+                  {'\n'}
+                  1. Identification of the copyrighted work claimed to have been infringed.
+                  {'\n'}
+                  2. Identification of the material or repository URL claimed to be infringing.
+                  {'\n'}
+                  3. Your contact information (name, address, telephone number, email).
+                  {'\n'}
+                  4. A statement of good faith belief that use is unauthorized.
+                  {'\n'}
+                  5. A statement under penalty of perjury that information in the notification is accurate.
+                  {'\n\n'}
+                  <Text style={styles.boldText}>Designated Copyright Agent Contact:</Text>
+                  {'\n'}
+                  Email: {SUPPORT_EMAIL}
+                </Text>
+              </ScrollView>
+
+              <View style={styles.dmcaActionsRow}>
+                <TouchableOpacity
+                  style={styles.dmcaEmailBtn}
+                  onPress={() => {
+                    const subject = encodeURIComponent('[DMCA Notice] Copyright Infringement Notification');
+                    const body = encodeURIComponent(
+                      'To: Miru Manga Designated Copyright Agent\n\n1. Copyrighted Work: \n2. Infringing URL / Repository: \n3. Copyright Owner Name: \n4. Contact Email/Phone: \n\nI state under penalty of perjury that I am the copyright owner or authorized agent.'
+                    );
+                    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="mail" size={16} color="#ffffff" />
+                  <Text style={styles.dmcaEmailBtnText}>Send DMCA Notice via Email</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* Age Gate Verification Modal */}
         <Modal
@@ -728,7 +1017,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       </SafeAreaView>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -737,14 +1026,14 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? 30 : 0,
   },
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -770,7 +1059,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   scrollContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 40,
   },
   sectionHeader: {
@@ -1233,6 +1523,233 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#ffffff',
     fontSize: 13,
+    fontWeight: '700',
+  },
+  feedbackBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  feedbackBadgeText: {
+    color: '#10b981',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  legalActionsList: {
+    marginTop: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+  },
+  legalActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  legalActionRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  legalActionIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: 'rgba(124, 92, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  legalActionTitle: {
+    flex: 1,
+    color: '#e2e8f0',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  feedbackModalContainer: {
+    width: '92%',
+    maxWidth: 420,
+    backgroundColor: '#121216',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  feedbackModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  feedbackModalTitle: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  feedbackCloseBtn: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  feedbackModalSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 14,
+  },
+  feedbackFieldLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  categoryPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  categoryPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  categoryPillActive: {
+    backgroundColor: 'rgba(124, 92, 255, 0.25)',
+    borderColor: colors.accent,
+  },
+  categoryPillText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  categoryPillTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  feedbackInput: {
+    backgroundColor: '#1a1a22',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  feedbackTextarea: {
+    height: 90,
+  },
+  feedbackActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  feedbackSubmitBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    borderRadius: 10,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  feedbackSubmitText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  feedbackEmailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(124, 92, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 92, 255, 0.3)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  feedbackEmailText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  dmcaModalContainer: {
+    width: '92%',
+    maxWidth: 440,
+    backgroundColor: '#121216',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  dmcaHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  dmcaTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '800',
+    marginLeft: 8,
+  },
+  dmcaBodyText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  dmcaActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+  },
+  dmcaEmailBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  dmcaEmailBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: '700',
   },
 });

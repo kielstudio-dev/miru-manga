@@ -12,4 +12,5 @@ export interface ISource {
   getChapters(mangaId: string): Promise<Chapter[]>;
   getPageList(chapterId: string): Promise<Page[]>;
   searchManga?(query: string): Promise<Manga[]>;
+  getCategories?(): { id: string; label: string }[];
 }

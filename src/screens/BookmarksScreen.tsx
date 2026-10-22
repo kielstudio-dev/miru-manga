@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -31,6 +31,7 @@ import {
 import { AdBanner } from '../components/monetization/AdBanner';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { subscribeToProStatus } from '../services/monetization';
+import { checkFavoriteMangaUpdates } from '../services/updates';
 import { colors } from '../theme/colors';
 
 interface BookmarksScreenProps {
@@ -40,9 +41,9 @@ interface BookmarksScreenProps {
   isFocused?: boolean;
 }
 
-type FilterType = 'all' | 'favorites' | 'reading' | 'completed' | 'local';
+type FilterType = 'all' | 'favorites' | 'updates' | 'reading' | 'completed' | 'local';
 
-export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
+export const BookmarksScreen = React.memo<BookmarksScreenProps>(({
   onOpenManga,
   onNavigateToExtensions,
   onNavigateToDownloads,
@@ -51,8 +52,10 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
   const [mangas, setMangas] = useState<Manga[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const [sortOrder, setSortOrder] = useState<'recent' | 'az'>('recent');
   const [importing, setImporting] = useState(false);
   const [isPro, setIsPro] = useState(false);
   const [proModalVisible, setProModalVisible] = useState(false);
@@ -114,13 +117,45 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
   // Refresh whenever screen receives focus
   useEffect(() => {
     if (isFocused) {
-      getAllManga().then((saved) => setMangas(saved)).catch(() => {});
+      getAllManga().then((saved) => {
+        setMangas((prev) => {
+          if (
+            prev.length === saved.length &&
+            prev.every((m, i) => m.id === saved[i]?.id && m.unreadCount === saved[i]?.unreadCount && m.isFavorite === saved[i]?.isFavorite)
+          ) {
+            return prev;
+          }
+          return saved;
+        });
+      }).catch(() => {});
     }
   }, [isFocused]);
 
-  const handleRefresh = () => {
+  const handleCheckUpdates = async () => {
+    try {
+      setCheckingUpdates(true);
+      const res = await checkFavoriteMangaUpdates();
+      await loadBookmarks();
+      if (res.hasUpdates) {
+        Alert.alert(
+          '🎉 New Chapters Available!',
+          `Found ${res.totalNewChapters} new chapter(s) across ${res.updatedMangaList.length} of your favorites:\n\n` +
+            res.updatedMangaList.map((u) => `• ${u.mangaTitle}: +${u.newChapterCount} new`).join('\n')
+        );
+      } else {
+        showToast('All your favorite manga are up to date! ✨');
+      }
+    } catch (err: any) {
+      Alert.alert('Update Notice', err?.message || 'Could not verify updates.');
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  const handleRefresh = async () => {
     setRefreshing(true);
-    loadBookmarks();
+    await loadBookmarks();
+    checkFavoriteMangaUpdates().then(() => loadBookmarks()).catch(() => {});
   };
 
   const handleImportFile = async () => {
@@ -167,6 +202,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
 
     // Filters
     if (activeFilter === 'favorites') return Boolean(m.isFavorite);
+    if (activeFilter === 'updates') return isInLibrary(m) && (m.unreadCount ?? 0) > 0;
     if (activeFilter === 'reading') return isReadingByUser(m);
     if (activeFilter === 'completed') return isCompletedByUser(m);
     if (activeFilter === 'local') return m.sourceId === 'local-storage';
@@ -174,6 +210,15 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
     // 'all': returns bookmarked titles, reading titles, or imported titles
     return isInLibrary(m);
   });
+
+  // Sort displayed manga by Alphabetical (A-Z) or Recent (added/read)
+  const displayedMangas = useMemo(() => {
+    const list = [...filteredMangas];
+    if (sortOrder === 'az') {
+      return list.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+    }
+    return list;
+  }, [filteredMangas, sortOrder]);
 
   const handleToggleQuickBookmark = async () => {
     if (!selectedQuickManga) return;
@@ -211,53 +256,79 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
   const favoritesCount = mangas.filter((m) => m.isFavorite).length;
   const readingCount = mangas.filter(isReadingByUser).length;
   const completedCount = mangas.filter(isCompletedByUser).length;
+  const updatesCount = mangas.filter((m) => (m.unreadCount ?? 0) > 0 && isInLibrary(m)).length;
+
+  const renderMangaItem = useCallback(
+    ({ item }: { item: Manga }) => (
+      <MangaCard
+        manga={item}
+        onPress={onOpenManga}
+        onLongPress={handleOpenQuickAction}
+        blurCover={Boolean(settings?.blurNsfwCovers)}
+      />
+    ),
+    [onOpenManga, settings?.blurNsfwCovers]
+  );
 
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         {/* Top Header Bar */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.headerTitle}>BOOKMARKS</Text>
-            <Text style={styles.headerSubtitle}>
-              {mangas.length > 0
-                ? `${favoritesCount} Favorited • ${readingCount} Reading • ${completedCount} Completed`
-                : 'Manga & Comic Dashboard'}
-            </Text>
-          </View>
-          <View style={styles.headerActions}>
-            {isPro ? (
-              <TouchableOpacity
-                style={styles.proBadgeActive}
-                onPress={() => setProModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="diamond" size={13} color="#f59e0b" />
-                <Text style={styles.proBadgeActiveText}>PRO</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.proUpgradeHeaderBtn}
-                onPress={() => setProModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="sparkles" size={13} color="#ffffff" />
-                <Text style={styles.proUpgradeHeaderText}>PRO</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={handleImportFile}
-              disabled={importing}
-              activeOpacity={0.7}
-            >
-              {importing ? (
-                <ActivityIndicator size="small" color={colors.primary} />
+          <View style={styles.headerTopRow}>
+            <View style={styles.headerTitleWrap}>
+              <Text style={styles.headerTitle}>BOOKMARKS</Text>
+            </View>
+            <View style={styles.headerActions}>
+              {isPro ? (
+                <TouchableOpacity
+                  style={styles.proBadgeActive}
+                  onPress={() => setProModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="diamond" size={13} color="#f59e0b" />
+                  <Text style={styles.proBadgeActiveText}>PRO</Text>
+                </TouchableOpacity>
               ) : (
-                <Ionicons name="folder-open-outline" size={20} color={colors.textPrimary} />
+                <TouchableOpacity
+                  style={styles.proUpgradeHeaderBtn}
+                  onPress={() => setProModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="sparkles" size={13} color="#ffffff" />
+                  <Text style={styles.proUpgradeHeaderText}>PRO</Text>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
+
+              {/* Check Manga Chapter Updates Button */}
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={handleCheckUpdates}
+                disabled={checkingUpdates}
+                activeOpacity={0.7}
+                accessibilityLabel="Sync Updates"
+              >
+                {checkingUpdates ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="sync-outline" size={17} color={colors.textPrimary} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionBtn}
+                onPress={handleImportFile}
+                disabled={importing}
+                activeOpacity={0.7}
+                accessibilityLabel="Import Local File"
+              >
+                {importing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="folder-open-outline" size={17} color={colors.textPrimary} />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -288,15 +359,51 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
             <TouchableOpacity
               style={[styles.pill, activeFilter === 'all' && styles.activePill]}
               onPress={() => setActiveFilter('all')}
+              delayPressIn={0}
             >
               <Text style={[styles.pillText, activeFilter === 'all' && styles.activePillText]}>
-                All Bookmarks
+                All Bookmarks ({mangas.length})
               </Text>
             </TouchableOpacity>
+
+            {/* A-Z Alphabetical / Recent Sort Toggle */}
+            <TouchableOpacity
+              style={[styles.pill, sortOrder === 'az' && styles.activeSortPill]}
+              onPress={() => setSortOrder((prev) => (prev === 'recent' ? 'az' : 'recent'))}
+              delayPressIn={0}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={sortOrder === 'az' ? 'text' : 'swap-vertical'}
+                size={13}
+                color={sortOrder === 'az' ? '#ffffff' : colors.accent}
+              />
+              <Text style={[styles.pillText, sortOrder === 'az' && styles.activePillText]}>
+                {sortOrder === 'az' ? 'A-Z Sorted' : 'Sort: Recent'}
+              </Text>
+            </TouchableOpacity>
+
+            {updatesCount > 0 && (
+              <TouchableOpacity
+                style={[styles.pill, activeFilter === 'updates' && styles.activeFavoritePill]}
+                onPress={() => setActiveFilter('updates')}
+                delayPressIn={0}
+              >
+                <Ionicons
+                  name="sparkles"
+                  size={13}
+                  color={activeFilter === 'updates' ? '#ffffff' : '#f59e0b'}
+                />
+                <Text style={[styles.pillText, activeFilter === 'updates' && styles.activePillText]}>
+                  Updates ({updatesCount})
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={[styles.pill, activeFilter === 'favorites' && styles.activeFavoritePill]}
               onPress={() => setActiveFilter('favorites')}
+              delayPressIn={0}
             >
               <Ionicons
                 name="heart"
@@ -311,6 +418,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
             <TouchableOpacity
               style={[styles.pill, activeFilter === 'reading' && styles.activePill]}
               onPress={() => setActiveFilter('reading')}
+              delayPressIn={0}
             >
               <Ionicons
                 name="book-outline"
@@ -325,6 +433,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
             <TouchableOpacity
               style={[styles.pill, activeFilter === 'completed' && styles.activePill]}
               onPress={() => setActiveFilter('completed')}
+              delayPressIn={0}
             >
               <Ionicons
                 name="checkmark-circle-outline"
@@ -339,6 +448,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
             <TouchableOpacity
               style={[styles.pill, activeFilter === 'local' && styles.activePill]}
               onPress={() => setActiveFilter('local')}
+              delayPressIn={0}
             >
               <Ionicons
                 name="folder-outline"
@@ -359,10 +469,10 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
           </View>
         ) : (
           <FlatList
-            data={filteredMangas}
+            data={displayedMangas}
             keyExtractor={(item) => item.id}
             numColumns={2}
-            columnWrapperStyle={filteredMangas.length > 0 ? styles.columnWrapper : undefined}
+            columnWrapperStyle={displayedMangas.length > 0 ? styles.columnWrapper : undefined}
             contentContainerStyle={styles.listContent}
             refreshControl={
               <RefreshControl
@@ -413,14 +523,11 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
                 )}
               </>
             }
-            renderItem={({ item }) => (
-              <MangaCard
-                manga={item}
-                onPress={onOpenManga}
-                onLongPress={handleOpenQuickAction}
-                blurCover={Boolean(settings?.blurNsfwCovers)}
-              />
-            )}
+            renderItem={renderMangaItem}
+            initialNumToRender={8}
+            maxToRenderPerBatch={6}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === 'android'}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
@@ -606,7 +713,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({
       </SafeAreaView>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -617,12 +724,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  headerTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   headerTitle: {
     color: colors.textPrimary,
@@ -630,24 +745,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.2,
   },
-  headerSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   proUpgradeHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    height: 34,
     borderRadius: 8,
+    justifyContent: 'center',
   },
   proUpgradeHeaderText: {
     color: '#ffffff',
@@ -661,9 +773,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.15)',
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.35)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    height: 34,
     borderRadius: 8,
+    justifyContent: 'center',
   },
   proBadgeActiveText: {
     color: '#f59e0b',
@@ -671,9 +784,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   actionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -727,6 +840,10 @@ const styles = StyleSheet.create({
   activeFavoritePill: {
     backgroundColor: '#ef4444',
     borderColor: '#ef4444',
+  },
+  activeSortPill: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   pillText: {
     color: colors.textSecondary,

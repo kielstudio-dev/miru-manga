@@ -2,6 +2,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Manga, Chapter, Page } from '../types';
 import { sourceRegistry } from './sources/registry';
 import { getDatabase, safeDbRun, saveManga, getAllManga } from './storage';
+import { isUserPro } from './monetization';
+
+export const FREE_DOWNLOAD_LIMIT = 5;
 
 export interface DownloadProgress {
   chapterId: string;
@@ -91,6 +94,16 @@ export async function downloadChapter(
   chapter: Chapter,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<DownloadedChapterRecord> {
+  const isPro = await isUserPro();
+  if (!isPro) {
+    const stats = await getDownloadsStorageStats();
+    if (stats.chapterCount >= FREE_DOWNLOAD_LIMIT) {
+      throw new Error(
+        `FREE_LIMIT_REACHED:Free tier is limited to ${FREE_DOWNLOAD_LIMIT} offline chapters. Upgrade to Lifetime Pro for unlimited downloads.`
+      );
+    }
+  }
+
   await initDownloadsTable();
   const baseDir = await getDownloadsDir();
   const safeMangaId = encodeURIComponent(manga.id).replace(/%/g, '_');
