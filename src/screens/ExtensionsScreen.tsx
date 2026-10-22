@@ -27,6 +27,7 @@ import {
   removeCustomRepo,
   COMMUNITY_PRESET_URL,
   COMMUNITY_NSFW_PRESET_URL,
+  COMMUNITY_CUONG_PRESET_URL,
 } from '../services/extensions/manager';
 import { Manga, ReaderSettings } from '../types';
 import { sourceRegistry } from '../services/sources/registry';
@@ -1038,6 +1039,41 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                   )}
                 </View>
 
+                {/* Tachiyomi / Mihon Global Catalog Preset */}
+                <View style={[styles.presetCard, { marginTop: 10, borderColor: 'rgba(56, 189, 248, 0.3)' }]}>
+                  <View style={[styles.presetIconWrap, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+                    <Ionicons name="library-outline" size={22} color="#38bdf8" />
+                  </View>
+                  <View style={styles.presetInfo}>
+                    <Text style={styles.presetTitle}>Tachiyomi Global Catalog</Text>
+                    <Text style={styles.presetDesc}>
+                      1,400+ international community extensions (Spanish, French, Indonesian, Italian).
+                    </Text>
+                  </View>
+                  {savedRepos.includes(COMMUNITY_CUONG_PRESET_URL) ? (
+                    <View style={styles.presetAddedBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                      <Text style={styles.presetAddedText}>Loaded</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.presetAddBtn, { backgroundColor: '#0284c7' }]}
+                      onPress={() => handleAddRepo(COMMUNITY_CUONG_PRESET_URL)}
+                      disabled={addingRepo}
+                      activeOpacity={0.8}
+                    >
+                      {addingRepo ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <>
+                          <Ionicons name="add" size={15} color="#ffffff" />
+                          <Text style={styles.presetAddBtnText}>Add</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+
                 {/* 18+ Mature Community Preset */}
                 <View style={[styles.presetCard, { marginTop: 10, borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
                   <View style={[styles.presetIconWrap, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
@@ -1082,7 +1118,7 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                 <Text style={styles.modalSectionLabel}>CUSTOM REPOSITORY URL</Text>
                 <View style={styles.customUrlCard}>
                   <Text style={styles.customUrlHelp}>
-                    Enter any repository manifest URL (JSON format):
+                    Enter any repository manifest URL (supports Tachiyomi, Mihon, Keiyoushi, and Miru formats):
                   </Text>
                   <TextInput
                     style={styles.modalUrlInput}
@@ -1124,7 +1160,13 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                         <View style={styles.activeRepoInfo}>
                           <Ionicons name="link" size={16} color={colors.primary} />
                           <Text style={styles.activeRepoText} numberOfLines={1}>
-                            {r === COMMUNITY_PRESET_URL ? 'Community Manga Hub (Preset)' : r}
+                            {r === COMMUNITY_PRESET_URL
+                              ? 'Community Manga Hub (Preset)'
+                              : r === COMMUNITY_CUONG_PRESET_URL
+                              ? 'Tachiyomi Global Catalog (Preset)'
+                              : r === COMMUNITY_NSFW_PRESET_URL
+                              ? 'Mature 18+ Manga Hub (Preset)'
+                              : r}
                           </Text>
                         </View>
                         <TouchableOpacity

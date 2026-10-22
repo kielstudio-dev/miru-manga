@@ -169,7 +169,7 @@ export class DynamicMadaraSource implements ISource {
    * Universal HTML parser to extract manga items from any Madara / webtoon HTML page
    */
   parseMangaListHtml(html: string): Manga[] {
-    const linkRegex = /<a\s+([^>]*?)href=["'](?:https?:\/\/[^\/"'>]+)?\/(?:manga|series|comic|comics|webtoon|manhwa)\/([^"'\/#?]+)\/?[^"']*["']([^>]*)>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a\s+([^>]*?)href=["'](?:https?:\/\/[^\/"'>]+)?\/(?:manga|series|comic|comics|webtoon|manhwa|scan|project|titre)\/([^"'\/#?]+)\/?[^"']*["']([^>]*)>([\s\S]*?)<\/a>/gi;
     const mangaLinks = [...html.matchAll(linkRegex)];
 
     const BADGES = new Set([
@@ -560,7 +560,7 @@ export class DynamicMadaraSource implements ISource {
             // 2. Modern chapter links for Asura Scans, Flame Comics, and custom themes
             const generalMatches = [
               ...html.matchAll(
-                /<a\s+[^>]*href=["']([^"']*(?:chapter|\/comics\/[^\/]+\/chapter|\/series\/\d+\/[a-f0-9]+)[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi
+                /<a\s+[^>]*href=["']([^"']*(?:chapter|chapitre|capitulo|episode|\/comics\/[^\/]+\/chapter|\/series\/\d+\/[a-f0-9]+|\/leer\/|\/read\/|\/ch-|\/c\d+)[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi
               ),
             ];
             for (const m of generalMatches) {
@@ -651,7 +651,7 @@ export class DynamicMadaraSource implements ISource {
       chTitle = chTitle.replace(/\s+/g, ' ').trim();
 
       // Extract accurate chapter number
-      const prefixMatch = chTitle.match(/(?:chapter|ch|ep|episode|#)\.?\s*(\d+(?:\.\d+)?)/i);
+      const prefixMatch = chTitle.match(/(?:chapter|chapitre|capitulo|episode|ep|ch|#)\.?\s*(\d+(?:\.\d+)?)/i);
       let chNum: number;
       if (prefixMatch) {
         chNum = parseFloat(prefixMatch[1]);
