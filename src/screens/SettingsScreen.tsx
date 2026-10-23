@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Linking,
   TextInput,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -152,6 +153,31 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
         },
       ]
     );
+  };
+
+  const handleShareApp = async () => {
+    try {
+      await Share.share({
+        title: 'Miru Manga - Free Manga & Manhwa Reader',
+        message: 'I am reading manga and webtoons with high-speed scans and offline downloads on Miru Manga! 📚✨\n\nDownload free on Google Play: https://play.google.com/store/apps/details?id=com.kiel.mirumanga',
+      });
+    } catch (e) {
+      // Ignore
+    }
+  };
+
+  const handleRateApp = () => {
+    const marketUrl = 'market://details?id=com.kiel.mirumanga';
+    const webUrl = 'https://play.google.com/store/apps/details?id=com.kiel.mirumanga';
+    Linking.canOpenURL(marketUrl)
+      .then((supported) => {
+        if (supported) {
+          return Linking.openURL(marketUrl);
+        } else {
+          return Linking.openURL(webUrl);
+        }
+      })
+      .catch(() => Linking.openURL(webUrl));
   };
 
   const handleCheckForUpdates = async () => {
@@ -762,6 +788,48 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
                 </Text>
               </View>
               <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            {/* Share Miru Manga */}
+            <TouchableOpacity
+              style={[styles.actionRow, { borderTopWidth: 1, borderTopColor: colors.border }]}
+              onPress={handleShareApp}
+              delayPressIn={0}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.rowLabel}>Share Miru Manga with Friends</Text>
+                  <View style={{ backgroundColor: 'rgba(124, 92, 255, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                    <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>INVITE</Text>
+                  </View>
+                </View>
+                <Text style={styles.rowSubtitle}>
+                  Share the app with fellow manga, manhwa & webtoon readers!
+                </Text>
+              </View>
+              <Ionicons name="share-social-outline" size={20} color={colors.primary} />
+            </TouchableOpacity>
+
+            {/* Rate on Google Play */}
+            <TouchableOpacity
+              style={[styles.actionRow, { borderTopWidth: 1, borderTopColor: colors.border }]}
+              onPress={handleRateApp}
+              delayPressIn={0}
+              activeOpacity={0.7}
+            >
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.rowLabel}>Rate on Google Play</Text>
+                  <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                    <Text style={{ color: '#f59e0b', fontSize: 10, fontWeight: '800' }}>★★★★★</Text>
+                  </View>
+                </View>
+                <Text style={styles.rowSubtitle}>
+                  Enjoying the app? Leave a 5-star rating to support indie development!
+                </Text>
+              </View>
+              <Ionicons name="star" size={20} color="#f59e0b" />
             </TouchableOpacity>
           </View>
 

@@ -579,7 +579,7 @@ export const BookmarksScreen = React.memo<BookmarksScreenProps>(({
         )}
 
         {/* Ad Banner on Free tier */}
-        <AdBanner />
+        <AdBanner onUpgradePress={() => setProModalVisible(true)} />
 
         {/* Pro Upgrade Modal */}
         <ProUpgradeModal

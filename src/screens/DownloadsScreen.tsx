@@ -26,6 +26,8 @@ import {
 } from '../services/downloads';
 import { pickAndImportComicFile } from '../services/sources/localSource';
 import { getAllManga } from '../services/storage';
+import { AdBanner } from '../components/monetization/AdBanner';
+import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
 
 interface DownloadsScreenProps {
@@ -61,6 +63,7 @@ export const DownloadsScreen = React.memo<DownloadsScreenProps>(({
   const [activeFilter, setActiveFilter] = useState<'all' | 'downloaded' | 'local'>('all');
   const [expandedMangaIds, setExpandedMangaIds] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  const [proModalVisible, setProModalVisible] = useState(false);
 
   const loadOfflineData = useCallback(async (isBackground = false) => {
     try {
@@ -566,6 +569,15 @@ export const DownloadsScreen = React.memo<DownloadsScreenProps>(({
             )}
           </ScrollView>
         )}
+
+        {/* Ad Banner on Free tier */}
+        <AdBanner onUpgradePress={() => setProModalVisible(true)} />
+
+        {/* Pro Upgrade Modal */}
+        <ProUpgradeModal
+          visible={proModalVisible}
+          onClose={() => setProModalVisible(false)}
+        />
       </SafeAreaView>
     </View>
   );

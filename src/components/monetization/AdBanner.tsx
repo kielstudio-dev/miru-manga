@@ -21,15 +21,15 @@ export const AdBanner: React.FC<AdBannerProps> = ({ onUpgradePress }) => {
     <View style={styles.container}>
       <View style={styles.adContent}>
         <View style={styles.adBadge}>
-          <Text style={styles.adBadgeText}>AD</Text>
+          <Text style={styles.adBadgeText}>SPONSORED</Text>
         </View>
 
         <View style={styles.adInfo}>
           <Text style={styles.adTitle} numberOfLines={1}>
-            Google AdMob Banner • Test Mode
+            Support Free Manga Reading
           </Text>
           <Text style={styles.adSubtitle} numberOfLines={1}>
-            Enjoying Miru Manga? Support development & go ad-free!
+            Enjoying Miru Manga? Upgrade to Lifetime Pro for 100% ad-free reading!
           </Text>
         </View>
 
@@ -37,6 +37,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ onUpgradePress }) => {
           <TouchableOpacity
             style={styles.removeAdsBtn}
             onPress={onUpgradePress}
+            delayPressIn={0}
             activeOpacity={0.8}
           >
             <Ionicons name="sparkles" size={13} color="#ffffff" />

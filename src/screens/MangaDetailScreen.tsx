@@ -9,6 +9,7 @@ import {
   Platform,
   Alert,
   RefreshControl,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -21,6 +22,7 @@ import {
   deleteDownloadedChapter,
   getDownloadedChapterIdsForManga,
 } from '../services/downloads';
+import { AdBanner } from '../components/monetization/AdBanner';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { colors } from '../theme/colors';
 import { getProxyImageUrl } from '../utils/imageProxy';
@@ -855,6 +857,11 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
         )}
       </View>
 
+      {/* Sponsored Ad Banner on Free Tier */}
+      <View style={{ marginHorizontal: 16, marginBottom: 12, borderRadius: 10, overflow: 'hidden' }}>
+        <AdBanner onUpgradePress={() => setShowProModal(true)} />
+      </View>
+
       {/* Chapters Section Toolbar */}
       <View style={styles.chapterSectionHeader}>
         {/* Left: Prominent Chapters Title & Count Badge */}
@@ -983,6 +990,17 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
     </View>
   );
 
+  const handleShareManga = async () => {
+    try {
+      await Share.share({
+        title: currentManga.title,
+        message: `Check out "${currentManga.title}" on Miru Manga! 📖✨\nRead high-speed scanlations & offline downloads: https://play.google.com/store/apps/details?id=com.kiel.mirumanga`,
+      });
+    } catch (e) {
+      // Ignore
+    }
+  };
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -994,13 +1012,23 @@ export const MangaDetailScreen: React.FC<MangaDetailScreenProps> = ({
           <Text style={styles.headerTitle} numberOfLines={1}>
             {currentManga.title}
           </Text>
-          <TouchableOpacity onPress={handleToggleFavorite} style={styles.headerBtn}>
-            <Ionicons
-              name={isFavorite ? 'heart' : 'heart-outline'}
-              size={22}
-              color={isFavorite ? '#ef4444' : colors.textPrimary}
-            />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <TouchableOpacity
+              onPress={handleShareManga}
+              style={styles.headerBtn}
+              delayPressIn={0}
+              accessibilityLabel="Share Manga"
+            >
+              <Ionicons name="share-social-outline" size={21} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleToggleFavorite} style={styles.headerBtn} delayPressIn={0}>
+              <Ionicons
+                name={isFavorite ? 'heart' : 'heart-outline'}
+                size={22}
+                color={isFavorite ? '#ef4444' : colors.textPrimary}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* High performance virtualized FlatList */}
