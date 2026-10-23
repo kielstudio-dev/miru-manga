@@ -17,7 +17,6 @@ export const WISTORIA_EXTENSION_MANIFEST: ExtensionManifest = {
 
 // Safe, open-source default extensions shipped with the app bundle (compliant with Play Store policies)
 export const DEFAULT_REPO_EXTENSIONS: ExtensionManifest[] = [
-  WISTORIA_EXTENSION_MANIFEST,
   {
     id: 'peppercarrot-open',
     name: 'Pepper & Carrot (Open)',
@@ -32,7 +31,6 @@ export const DEFAULT_REPO_EXTENSIONS: ExtensionManifest[] = [
 
 export const COMMUNITY_PRESET_URL = 'https://raw.githubusercontent.com/vortex-community/manga-repo/main/index.json';
 export const COMMUNITY_NSFW_PRESET_URL = 'https://raw.githubusercontent.com/vortex-community/manga-repo/main/nsfw-index.json';
-export const COMMUNITY_CUONG_PRESET_URL = 'https://raw.githubusercontent.com/cuong-tran/manga-repo/repo/index.json';
 
 export const COMMUNITY_NSFW_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
   {
@@ -48,14 +46,14 @@ export const COMMUNITY_NSFW_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
   },
   {
     id: 'mangadex-doujinshi-18',
-    name: 'MangaDex (18+ Doujinshi & Hentai)',
+    name: 'MangaDex (18+ Doujinshi & Mature Manga)',
     version: '1.4.0',
     lang: 'ALL',
     icon: 'https://mangadex.org/favicon.ico',
     baseUrl: 'https://api.mangadex.org',
     type: 'mangadex',
     isNsfw: true,
-    description: '10,000+ uncensored adult Japanese doujinshi, colorized releases, and hentai manga.',
+    description: '10,000+ adult Japanese doujinshi, colorized releases, and mature serialized manga.',
   },
   {
     id: 'mangadex-romance-18',
@@ -167,39 +165,6 @@ export const COMMUNITY_NSFW_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
     isNsfw: true,
     description: 'Spicy female-lead reverse harem webtoons and adult romance.',
   },
-  {
-    id: 'fr-histoiredhentai',
-    name: 'HistoireDHentai (French 18+)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/histoiredhentai/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://hhentai.fr',
-    type: 'madara',
-    isNsfw: true,
-    description: 'French 18+ adult manga, colorized releases, and doujinshi.',
-  },
-  {
-    id: 'es-nexusscanlation',
-    name: 'NexusScanlation (Spanish 18+)',
-    version: '1.4.0',
-    lang: 'ES',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/es/nexusscanlation/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://nexusscanlation.com',
-    type: 'madara',
-    isNsfw: true,
-    description: 'Spanish 18+ adult manhwa and uncensored webtoons.',
-  },
-  {
-    id: 'id-dojingnet',
-    name: 'Dojing.net (Indonesian 18+)',
-    version: '1.4.0',
-    lang: 'ID',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/id/dojingnet/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://dojing.net',
-    type: 'madara',
-    isNsfw: true,
-    description: 'Indonesian 18+ adult doujinshi and fan-translated comics.',
-  },
 ];
 
 export const COMMUNITY_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
@@ -266,158 +231,6 @@ export const COMMUNITY_FALLBACK_EXTENSIONS: ExtensionManifest[] = [
     baseUrl: 'https://mangaeffect.com',
     type: 'madara',
     description: 'High-speed English translated manga, manhwa, and webtoon chapters.',
-  },
-
-  // 1.5. Community Verified Global & Multilingual Extensions (Spanish, French, Indonesian, Italian, English)
-  {
-    id: 'fr-lelmanga',
-    name: 'Lelmanga (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/lelmanga/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://www.lelmanga.com',
-    type: 'madara',
-    description: 'Premier French manga and webtoon scanlations with day-1 chapter releases.',
-  },
-  {
-    id: 'es-leercapitulo',
-    name: 'LeerCapitulo (Spanish)',
-    version: '1.4.0',
-    lang: 'ES',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/es/leercapitulo/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://www.leercapitulo.co',
-    type: 'madara',
-    description: 'Top Spanish manga & manhwa reading catalog with 100+ active series.',
-  },
-  {
-    id: 'es-lectormangalat',
-    name: 'LectorManga.lat (Spanish)',
-    version: '1.4.0',
-    lang: 'ES',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/es/lectormangalat/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://lector-mangas.lat',
-    type: 'madara',
-    description: 'Popular Spanish scanlation reader for manhwa, manhua, and webtoons.',
-  },
-  {
-    id: 'es-spicyscan',
-    name: 'Spicy Scan (Spanish)',
-    version: '1.4.0',
-    lang: 'ES',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/es/spicyscan/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://spicyseries.com',
-    type: 'madara',
-    description: 'Spanish translated fantasy, romance, and leveling manhwa.',
-  },
-  {
-    id: 'fr-dassouscan',
-    name: 'Dassou Scan (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/dassouscan/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://dassouscan.com',
-    type: 'madara',
-    description: 'French translated martial arts, cultivation, and action series.',
-  },
-  {
-    id: 'fr-lelscanvf',
-    name: 'Lelscan-VF (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/lelscanvf/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://www.lelscanfr.com',
-    type: 'madara',
-    description: 'French VF manga scanlations with fast loading chapters.',
-  },
-  {
-    id: 'fr-harmony-scan',
-    name: 'Harmony-Scan (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/bananascan/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://harmony-scan.fr',
-    type: 'madara',
-    description: 'High-quality French translated manhwa and webtoons.',
-  },
-  {
-    id: 'fr-chaostrad',
-    name: 'ChaosTrad (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/chaostrad/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://chaostrad.fr',
-    type: 'madara',
-    description: 'French translated comics and manga chapters.',
-  },
-  {
-    id: 'id-voratoon',
-    name: 'VoraToon (Indonesian)',
-    version: '1.4.0',
-    lang: 'ID',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/id/voratoon/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://v8.voratoon.com',
-    type: 'madara',
-    description: 'Indonesian translated manhwa, webtoons, and leveling manga.',
-  },
-  {
-    id: 'id-roseveil',
-    name: 'Roseveil (Indonesian)',
-    version: '1.4.0',
-    lang: 'ID',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/id/roseveil/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://roseveil.org',
-    type: 'madara',
-    description: 'Indonesian scanlation hub with weekly webtoon releases.',
-  },
-  {
-    id: 'id-komiknextgonline',
-    name: 'Komik Next G Online (Indonesian)',
-    version: '1.4.0',
-    lang: 'ID',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/id/komiknextgonline/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://komiknextgonline.com',
-    type: 'madara',
-    description: 'Official Indonesian Next G comics and illustrated stories.',
-  },
-  {
-    id: 'id-pramramadhan',
-    name: 'Pramramadhan (Indonesian)',
-    version: '1.4.0',
-    lang: 'ID',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/id/pramramadhan/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://01.pramramadhan.my.id',
-    type: 'madara',
-    description: 'Indonesian translated manga and slice-of-life comedy series.',
-  },
-  {
-    id: 'it-juinjutsuteamreader',
-    name: 'Juin Jutsu Team Reader (Italian)',
-    version: '1.4.0',
-    lang: 'IT',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/it/juinjutsuteamreader/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://www.juinjutsureader.ovh',
-    type: 'madara',
-    description: 'Historic Italian manga scanlation team with classic and current shonen releases.',
-  },
-  {
-    id: 'fr-fmteam',
-    name: 'FMTEAM (French)',
-    version: '1.4.0',
-    lang: 'FR',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/fr/fmteam/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://fmteam.fr',
-    type: 'madara',
-    description: 'French high-definition One Punch Man and action releases.',
-  },
-  {
-    id: 'en-mangak',
-    name: 'MangaK (English)',
-    version: '1.4.0',
-    lang: 'EN',
-    icon: 'https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main/src/en/mangabuddy/res/mipmap-xhdpi/ic_launcher.png',
-    baseUrl: 'https://mangak.io',
-    type: 'madara',
-    description: 'English manga aggregator with trending and newly updated chapters.',
   },
 
   // 2. MangaDex Global & Origin Catalogs
@@ -826,6 +639,24 @@ const DEFUNCT_IDS = new Set([
   'hentai2read-com',
   'toongod-org',
   'flamecomics-me',
+  'fr-lelmanga',
+  'es-leercapitulo',
+  'es-lectormangalat',
+  'es-spicyscan',
+  'fr-dassouscan',
+  'fr-lelscanvf',
+  'fr-harmony-scan',
+  'fr-chaostrad',
+  'id-voratoon',
+  'id-roseveil',
+  'id-komiknextgonline',
+  'id-pramramadhan',
+  'it-juinjutsuteamreader',
+  'fr-fmteam',
+  'en-mangak',
+  'fr-histoiredhentai',
+  'es-nexusscanlation',
+  'id-dojingnet',
 ]);
 
 let installedManifests: ExtensionManifest[] = [];
@@ -859,13 +690,9 @@ export async function getInstalledExtensions(): Promise<ExtensionManifest[]> {
     );
     if (row && row.value) {
       const parsed: ExtensionManifest[] = JSON.parse(row.value);
-      // Clean out any defunct extensions (e.g. dead domains like manhuaus)
+      // Clean out any defunct extensions (e.g. dead domains or non-working community extensions)
       const cleaned = parsed.filter((m) => !DEFUNCT_IDS.has(m.id));
-      // Auto-install wistoria-scans if not already registered
-      if (!cleaned.some((m) => m.id === WISTORIA_EXTENSION_MANIFEST.id)) {
-        cleaned.unshift({ ...WISTORIA_EXTENSION_MANIFEST, installed: true });
-      }
-      if (cleaned.length !== parsed.length || !parsed.some((m) => m.id === WISTORIA_EXTENSION_MANIFEST.id)) {
+      if (cleaned.length !== parsed.length) {
         await db.runAsync(
           `INSERT OR REPLACE INTO settings (key, value) VALUES ('installed_extensions', ?);`,
           [JSON.stringify(cleaned)]
@@ -873,10 +700,7 @@ export async function getInstalledExtensions(): Promise<ExtensionManifest[]> {
       }
       installedManifests = cleaned;
     } else {
-      const initial = [
-        { ...WISTORIA_EXTENSION_MANIFEST, installed: true },
-        ...DEFAULT_REPO_EXTENSIONS.map((m) => ({ ...m, installed: true })),
-      ];
+      const initial = DEFAULT_REPO_EXTENSIONS.map((m) => ({ ...m, installed: true }));
       await db.runAsync(
         `INSERT OR REPLACE INTO settings (key, value) VALUES ('installed_extensions', ?);`,
         [JSON.stringify(initial)]
@@ -1040,14 +864,6 @@ export async function fetchRepositoryExtensions(repoUrl?: string): Promise<Exten
         installed: installed.some((i) => i.id === ext.id),
       }));
     } catch (err) {
-      if (repoUrl === COMMUNITY_CUONG_PRESET_URL || repoUrl.includes('cuong-tran') || repoUrl.includes('manga-repo')) {
-        return COMMUNITY_FALLBACK_EXTENSIONS.filter(
-          (e) => e.id.startsWith('es-') || e.id.startsWith('fr-') || e.id.startsWith('id-') || e.id.startsWith('it-') || e.id.startsWith('en-')
-        ).map((ext) => ({
-          ...ext,
-          installed: installed.some((i) => i.id === ext.id),
-        }));
-      }
       if (repoUrl === COMMUNITY_NSFW_PRESET_URL || repoUrl.includes('nsfw')) {
         return COMMUNITY_NSFW_FALLBACK_EXTENSIONS.map((ext) => ({
           ...ext,
@@ -1088,11 +904,6 @@ export async function fetchRepositoryExtensions(repoUrl?: string): Promise<Exten
       } catch (e) {
         // Fallback gracefully on timeout or network error
       }
-      if (r === COMMUNITY_CUONG_PRESET_URL || r.includes('cuong-tran') || r.includes('manga-repo')) {
-        return COMMUNITY_FALLBACK_EXTENSIONS.filter(
-          (e) => e.id.startsWith('es-') || e.id.startsWith('fr-') || e.id.startsWith('id-') || e.id.startsWith('it-') || e.id.startsWith('en-')
-        );
-      }
       if (r === COMMUNITY_NSFW_PRESET_URL || r.includes('nsfw')) {
         return COMMUNITY_NSFW_FALLBACK_EXTENSIONS;
       }
@@ -1126,10 +937,5 @@ export async function initializeInstalledExtensions(): Promise<void> {
   for (const manifest of installed) {
     const source = createSourceFromManifest(manifest);
     sourceRegistry.register(source);
-  }
-  // Ensure Wistoria dedicated source is registered in the live registry
-  if (!sourceRegistry.has(WISTORIA_EXTENSION_MANIFEST.id)) {
-    const wistoriaSource = createSourceFromManifest(WISTORIA_EXTENSION_MANIFEST);
-    sourceRegistry.register(wistoriaSource);
   }
 }

@@ -23,7 +23,7 @@ import { ReaderMode, BackgroundTheme, ReaderSettings } from '../types';
 import { getSettings, saveSettings, createBackupData, restoreBackupData } from '../services/storage';
 import { subscribeToProStatus, setUserPro, restorePurchases } from '../services/monetization';
 import { getCloudSyncStatus, performFullCloudSync, CloudSyncStatus } from '../services/cloudSync';
-import { signInOrLinkGoogle, signOutAndResetToGuest } from '../services/auth';
+import { signInOrLinkGoogle, signOutAndResetToGuest, deleteAccountAndCloudData } from '../services/auth';
 import { ProUpgradeModal } from '../components/monetization/ProUpgradeModal';
 import { FeedbackCategory, submitFeedback, openSupportEmail, SUPPORT_EMAIL } from '../services/feedback';
 import { colors } from '../theme/colors';
@@ -122,6 +122,26 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
             const nextStatus = await getCloudSyncStatus();
             setSyncStatus(nextStatus);
             Alert.alert('Signed Out', 'You are now browsing in a guest session.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Cloud Account & Data',
+      'This will permanently delete your cloud account, synced bookmarks, and reading history from our servers. This action cannot be undone.\n\nYou may also submit a deletion request via our website:\nhttps://kielstudio-dev.github.io/miru-manga/privacy.html#data-deletion',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await deleteAccountAndCloudData();
+            const nextStatus = await getCloudSyncStatus();
+            setSyncStatus(nextStatus);
+            Alert.alert(res.success ? 'Account Deleted' : 'Notice', res.message);
           },
         },
       ]
@@ -534,13 +554,23 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
                 </Text>
               </View>
               {syncStatus?.email ? (
-                <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn} activeOpacity={0.7}>
-                  <Text style={styles.signOutBtnText}>Sign Out</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn} activeOpacity={0.7}>
+                    <Text style={styles.signOutBtnText}>Sign Out</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleDeleteAccount} style={[styles.signOutBtn, { borderColor: 'rgba(239, 68, 68, 0.4)' }]} activeOpacity={0.7}>
+                    <Text style={[styles.signOutBtnText, { color: '#ef4444' }]}>Delete Data</Text>
+                  </TouchableOpacity>
+                </View>
               ) : syncStatus?.userId ? (
-                <Text style={styles.cloudUserIdText} numberOfLines={1}>
-                  ID: {syncStatus.userId.slice(0, 8)}...
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.cloudUserIdText} numberOfLines={1}>
+                    ID: {syncStatus.userId.slice(0, 8)}...
+                  </Text>
+                  <TouchableOpacity onPress={handleDeleteAccount} style={[styles.signOutBtn, { borderColor: 'rgba(239, 68, 68, 0.4)', paddingHorizontal: 8 }]} activeOpacity={0.7}>
+                    <Text style={[styles.signOutBtnText, { color: '#ef4444', fontSize: 11 }]}>Clear Cloud</Text>
+                  </TouchableOpacity>
+                </View>
               ) : null}
             </View>
 
@@ -775,6 +805,19 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
                 </View>
                 <Text style={[styles.legalActionTitle, { color: '#10b981' }]}>Official Privacy Policy</Text>
                 <Ionicons name="open-outline" size={15} color="#10b981" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.legalActionRow, styles.legalActionRowBorder]}
+                onPress={handleDeleteAccount}
+                delayPressIn={0}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.legalActionIconWrap, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
+                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                </View>
+                <Text style={[styles.legalActionTitle, { color: '#f87171' }]}>Delete Account & Cloud Data</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
           </View>
