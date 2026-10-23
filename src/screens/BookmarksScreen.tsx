@@ -12,6 +12,7 @@ import {
   Alert,
   Modal,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -114,20 +115,23 @@ export const BookmarksScreen = React.memo<BookmarksScreenProps>(({
     loadBookmarks();
   }, [loadBookmarks]);
 
-  // Refresh whenever screen receives focus
+  // Refresh whenever screen receives focus (deferred until tab transition completes)
   useEffect(() => {
     if (isFocused) {
-      getAllManga().then((saved) => {
-        setMangas((prev) => {
-          if (
-            prev.length === saved.length &&
-            prev.every((m, i) => m.id === saved[i]?.id && m.unreadCount === saved[i]?.unreadCount && m.isFavorite === saved[i]?.isFavorite)
-          ) {
-            return prev;
-          }
-          return saved;
-        });
-      }).catch(() => {});
+      const interaction = InteractionManager.runAfterInteractions(() => {
+        getAllManga().then((saved) => {
+          setMangas((prev) => {
+            if (
+              prev.length === saved.length &&
+              prev.every((m, i) => m.id === saved[i]?.id && m.unreadCount === saved[i]?.unreadCount && m.isFavorite === saved[i]?.isFavorite)
+            ) {
+              return prev;
+            }
+            return saved;
+          });
+        }).catch(() => {});
+      });
+      return () => interaction.cancel();
     }
   }, [isFocused]);
 

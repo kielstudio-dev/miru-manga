@@ -12,6 +12,8 @@ import {
   Modal,
   ScrollView,
   BackHandler,
+  RefreshControl,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -225,9 +227,38 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
     ]);
   };
 
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+
+  const handlePullRefresh = async () => {
+    try {
+      setPullRefreshing(true);
+      await loadData(false);
+    } finally {
+      setPullRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     if (isFocused) {
-      loadData(extensions.length > 0);
+      if (extensions.length === 0) {
+        loadData(false);
+      } else {
+        // Tab switch: Only sync installed status in SQLite via InteractionManager
+        const interaction = InteractionManager.runAfterInteractions(async () => {
+          try {
+            const installed = await getInstalledExtensions();
+            setExtensions((prev) =>
+              prev.map((ext) => ({
+                ...ext,
+                installed: installed.some((i) => i.id === ext.id),
+              }))
+            );
+          } catch (e) {
+            // Ignore
+          }
+        });
+        return () => interaction.cancel();
+      }
     }
   }, [isFocused]);
 
@@ -335,7 +366,7 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
               if (p1 && p1.length > 0) {
                 setExtensionMangaList(p1);
                 setBrowsePage(1);
-                setBrowseHasMore(true);
+                setBrowseHasMore(p1.length >= 10);
                 await setCachedCatalog(browsingExtension.id, cat, 1, p1);
 
                 // Proactively prefetch top covers for instant display
@@ -345,27 +376,37 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                     Image.prefetch(cUrl).catch(() => {});
                   }
                 }
+              } else {
+                setExtensionMangaList([]);
+                setBrowseHasMore(false);
               }
             } catch (err) {
               // If background fetch failed but we had cache, retain cached results
               if (!cached || cached.length === 0) {
                 setExtensionMangaList([]);
+                setBrowseHasMore(false);
               }
             } finally {
               setBrowsingLoading(false);
             }
           } else {
             const list = await source.getMangaList(page, cat);
-            if (list.length === 0) {
+            if (!list || list.length === 0) {
               setBrowseHasMore(false);
             } else {
+              let addedCount = 0;
               setExtensionMangaList((prev) => {
                 const seen = new Set(prev.map((m) => m.id));
                 const newlyAdded = list.filter((m) => !seen.has(m.id));
+                addedCount = newlyAdded.length;
                 return [...prev, ...newlyAdded];
               });
-              setBrowsePage(page);
-              setCachedCatalog(browsingExtension.id, cat, page, list).catch(() => {});
+              if (addedCount === 0 || list.length < 10) {
+                setBrowseHasMore(false);
+              } else {
+                setBrowsePage(page);
+                setCachedCatalog(browsingExtension.id, cat, page, list).catch(() => {});
+              }
             }
           }
         }
@@ -529,7 +570,7 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
               columnWrapperStyle={styles.columnWrapper}
               contentContainerStyle={styles.browseListContent}
               onEndReached={handleLoadMoreBrowse}
-              onEndReachedThreshold={0.5}
+              onEndReachedThreshold={0.25}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
               windowSize={5}
@@ -540,6 +581,12 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
                     <ActivityIndicator size="small" color={colors.primary} />
                     <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 6 }}>
                       Loading more titles...
+                    </Text>
+                  </View>
+                ) : !browseHasMore && extensionMangaList.length > 0 ? (
+                  <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600' }}>
+                      • End of manga catalog •
                     </Text>
                   </View>
                 ) : undefined
@@ -890,6 +937,23 @@ export const ExtensionsScreen = React.memo<ExtensionsScreenProps>(({
             maxToRenderPerBatch={8}
             windowSize={5}
             removeClippedSubviews={Platform.OS === 'android'}
+            refreshControl={
+              <RefreshControl
+                refreshing={pullRefreshing}
+                onRefresh={handlePullRefresh}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            ListFooterComponent={
+              filteredExtensions.length > 0 ? (
+                <View style={styles.listFooter}>
+                  <Text style={styles.listFooterText}>
+                    • End of catalog ({filteredExtensions.length} {activeTab} {filteredExtensions.length === 1 ? 'extension' : 'extensions'}) •
+                  </Text>
+                </View>
+              ) : undefined
+            }
             renderItem={({ item }) => (
               <View style={styles.extensionCard}>
                 <View style={styles.extensionIconContainer}>
@@ -1269,7 +1333,19 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  listFooter: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listFooterText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   extensionCard: {
     flexDirection: 'row',
@@ -1415,7 +1491,8 @@ const styles = StyleSheet.create({
   },
   browseListContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 24,
+    flexGrow: 1,
   },
   columnWrapper: {
     justifyContent: 'space-between',

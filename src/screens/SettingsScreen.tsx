@@ -131,9 +131,15 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Cloud Account & Data',
-      'This will permanently delete your cloud account, synced bookmarks, and reading history from our servers. This action cannot be undone.\n\nYou may also submit a deletion request via our website:\nhttps://kielstudio-dev.github.io/miru-manga/privacy.html#data-deletion',
+      'This will permanently delete your cloud account, synced bookmarks, and reading history from our servers. This action cannot be undone.\n\nYou can also submit or review deletion policies via our official website.',
       [
         { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'View Web Page',
+          onPress: () => {
+            Linking.openURL('https://kielstudio-dev.github.io/miru-manga/privacy.html#data-deletion');
+          },
+        },
         {
           text: 'Delete Permanently',
           style: 'destructive',
@@ -805,6 +811,19 @@ export const SettingsScreen = React.memo<SettingsScreenProps>(({
                 </View>
                 <Text style={[styles.legalActionTitle, { color: '#10b981' }]}>Official Privacy Policy</Text>
                 <Ionicons name="open-outline" size={15} color="#10b981" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.legalActionRow, styles.legalActionRowBorder]}
+                onPress={() => Linking.openURL('https://kielstudio-dev.github.io/miru-manga/privacy.html#data-deletion')}
+                delayPressIn={0}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.legalActionIconWrap, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+                  <Ionicons name="globe-outline" size={16} color="#38bdf8" />
+                </View>
+                <Text style={[styles.legalActionTitle, { color: '#38bdf8' }]}>Data Deletion & Rights (Web Portal)</Text>
+                <Ionicons name="open-outline" size={15} color="#38bdf8" />
               </TouchableOpacity>
 
               <TouchableOpacity

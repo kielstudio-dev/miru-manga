@@ -9,6 +9,7 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -100,12 +101,15 @@ export const DownloadsScreen = React.memo<DownloadsScreenProps>(({
     loadOfflineData();
   }, [loadOfflineData]);
 
-  // Refresh whenever screen receives focus
+  // Refresh whenever screen receives focus (deferred until tab transition finishes)
   useEffect(() => {
     if (isFocused) {
-      loadOfflineData(downloadedItems.length > 0);
+      const interaction = InteractionManager.runAfterInteractions(() => {
+        loadOfflineData(downloadedItems.length > 0);
+      });
+      return () => interaction.cancel();
     }
-  }, [isFocused, loadOfflineData]);
+  }, [isFocused, loadOfflineData, downloadedItems.length]);
 
   const handleRefresh = () => {
     setRefreshing(true);

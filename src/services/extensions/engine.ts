@@ -85,6 +85,28 @@ async function fetchWithDnsFallback(
 export function cleanSourceImageUrl(rawUrl: string, baseUrl?: string): string {
   if (!rawUrl) return '';
   let url = rawUrl.trim();
+
+  // Special optimization for Flame Comics:
+  // Raw CDN serves uncompressed 1.5MB+ PNGs which load slowly on mobile networks.
+  // Next.js image optimization endpoint (/w=384&q=75) serves 49KB WebP (31x smaller, instant display).
+  if (url.includes('flamecomics')) {
+    let cdnTarget = url;
+    if (url.includes('_next/image') && url.includes('url=')) {
+      const match = url.match(/[?&]url=([^&]+)/);
+      if (match) {
+        try {
+          cdnTarget = decodeURIComponent(match[1]);
+        } catch (e) {}
+      }
+    }
+    if (cdnTarget.startsWith('//')) {
+      cdnTarget = `https:${cdnTarget}`;
+    } else if (cdnTarget.startsWith('/') && !cdnTarget.startsWith('/_next')) {
+      cdnTarget = `https://flamecomics.xyz${cdnTarget}`;
+    }
+    return `https://flamecomics.xyz/_next/image?url=${encodeURIComponent(cdnTarget)}&w=384&q=75`;
+  }
+
   if (url.includes('_next/image') && url.includes('url=')) {
     const nextUrlMatch = url.match(/[?&]url=([^&]+)/);
     if (nextUrlMatch) {
